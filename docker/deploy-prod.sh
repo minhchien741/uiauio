@@ -547,8 +547,7 @@ fi
 echo -n "  ⏳ Backend API: "
 BE_READY=false
 for i in $(seq 1 30); do
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:${API_PORT:-5114}/swagger/index.html" 2>/dev/null || echo "000")
-    if [ "$HTTP_CODE" = "200" ]; then
+    if docker exec room_backend curl -s http://localhost:8080/swagger/index.html > /dev/null 2>&1; then
         echo -e "${GREEN}ready ✅${NC}"
         BE_READY=true
         break
@@ -564,8 +563,7 @@ fi
 echo -n "  ⏳ Frontend:    "
 FE_READY=false
 for i in $(seq 1 20); do
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:${FE_PORT:-3000}" 2>/dev/null || echo "000")
-    if [ "$HTTP_CODE" = "200" ]; then
+    if docker exec room_frontend wget -q -O - http://localhost:3000 > /dev/null 2>&1; then
         echo -e "${GREEN}ready ✅${NC}"
         FE_READY=true
         break
@@ -581,8 +579,7 @@ fi
 echo -n "  ⏳ Nginx:       "
 NG_READY=false
 for i in $(seq 1 10); do
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:80" 2>/dev/null || echo "000")
-    if [ "$HTTP_CODE" != "000" ]; then
+    if docker inspect --format='{{.State.Status}}' room_nginx 2>/dev/null | grep -q 'running'; then
         echo -e "${GREEN}ready ✅${NC}"
         NG_READY=true
         break
