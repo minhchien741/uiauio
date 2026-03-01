@@ -34,9 +34,11 @@ builder.Services.AddHostedService<RoomScheduling.API.Services.RoomReminderServic
 
 var app = builder.Build();
 
-// 5. Cấu hình HTTP request pipeline
-app.UseSwagger();
-app.UseSwaggerUI();
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
 
 // Không dùng HttpsRedirection bên trong Docker vì Nginx đã xử lý SSL
 // app.UseHttpsRedirection();

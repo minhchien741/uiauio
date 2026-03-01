@@ -202,28 +202,9 @@ server {
     }
 
     # Backend API
-    location /api/ {
-        proxy_pass http://${be_target}/api/;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \\\$http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host \\\$host;
-        proxy_set_header X-Real-IP \\\$remote_addr;
-        proxy_set_header X-Forwarded-For \\\$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \\\$scheme;
-        proxy_cache_bypass \\\$http_upgrade;
-        client_max_body_size 50M;
-    }
+    # (Đã xóa block /api/ vì frontend Node.js tự handle /api/* và tự gọi sang .NET)
 
-    # Swagger UI
-    location /swagger {
-        proxy_pass http://${be_target}/swagger;
-        proxy_http_version 1.1;
-        proxy_set_header Host \\\$host;
-        proxy_set_header X-Real-IP \\\$remote_addr;
-        proxy_set_header X-Forwarded-For \\\$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \\\$scheme;
-    }
+    # (Đã tắt Swagger ở môi trường Production)
 
     # Hangfire Dashboard
     location /hangfire {
@@ -546,8 +527,8 @@ fi
 # Doi Backend
 echo -n "  ⏳ Backend API: "
 BE_READY=false
-for i in $(seq 1 30); do
-    if docker exec room_backend curl -s http://localhost:8080/swagger/index.html > /dev/null 2>&1; then
+for i in $(seq 1 15); do
+    if docker inspect --format='{{.State.Status}}' room_backend 2>/dev/null | grep -q 'running'; then
         echo -e "${GREEN}ready ✅${NC}"
         BE_READY=true
         break
@@ -562,8 +543,8 @@ fi
 # Doi Frontend
 echo -n "  ⏳ Frontend:    "
 FE_READY=false
-for i in $(seq 1 20); do
-    if docker exec room_frontend wget -q -O - http://localhost:3000 > /dev/null 2>&1; then
+for i in $(seq 1 15); do
+    if docker inspect --format='{{.State.Status}}' room_frontend 2>/dev/null | grep -q 'running'; then
         echo -e "${GREEN}ready ✅${NC}"
         FE_READY=true
         break
@@ -618,10 +599,8 @@ if $ALL_RUNNING; then
     echo -e "${GREEN}║${NC}                                                          ${GREEN}║${NC}"
     if [ -n "$DOMAIN_NAME" ]; then
         printf  "${GREEN}║${NC}  🌐 Frontend:   https://%-34s${GREEN}║${NC}\n" "${DISPLAY_DOMAIN}"
-        printf  "${GREEN}║${NC}  📡 Swagger:    https://%-34s${GREEN}║${NC}\n" "${DISPLAY_DOMAIN}/swagger"
     else
         printf  "${GREEN}║${NC}  🌐 Frontend:   http://%-35s${GREEN}║${NC}\n" "${DISPLAY_DOMAIN}"
-        printf  "${GREEN}║${NC}  📡 Swagger:    http://%-35s${GREEN}║${NC}\n" "${DISPLAY_DOMAIN}/swagger"
     fi
     printf  "${GREEN}║${NC}  🗄️  SQL Server: localhost:%-31s${GREEN}║${NC}\n" "${DB_PORT:-1433}"
     echo -e "${GREEN}║${NC}                                                          ${GREEN}║${NC}"
