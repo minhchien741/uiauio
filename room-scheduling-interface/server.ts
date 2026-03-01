@@ -486,11 +486,35 @@ Hãy trả lời khách dựa trên dữ liệu hệ thống trên. Nếu hỏi 
     res.json({ frontend: 'ok', dotnet_backend: r.ok ? 'ok' : 'unreachable', dotnet_url: DOTNET_API });
   });
 
-  // ==================== VITE DEV ====================
+  // ==================== VITE DEV OR PROD STATIC ====================
 
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });
     app.use(vite.middlewares);
+  } else {
+    // ======== CẤU HÌNH CSP (Bảo mật + Cho phép Cloudflare) ========
+    app.use((_req, res, next) => {
+      res.setHeader(
+        'Content-Security-Policy',
+        "default-src 'self'; " +
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://static.cloudflareinsights.com; " +
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+        "font-src 'self' https://fonts.gstatic.com; " +
+        "img-src 'self' data: https:; " +
+        "connect-src 'self' https://static.cloudflareinsights.com;"
+      );
+      next();
+    });
+
+    // ======== PHỤC VỤ FILE TĨNH FRONTEND ========
+    const path = require('path');
+    const distPath = path.join(__dirname, 'dist');
+    app.use(express.static(distPath));
+
+    // Fallback cho React Router (Tránh 404 khi load trực tiếp link con)
+    app.get('*', (_req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
   }
 
   app.listen(PORT, '0.0.0.0', () => {

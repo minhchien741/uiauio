@@ -61,15 +61,20 @@ chmod 600 docker/nginx/ssl/origin-key.pem
 
 ## Bước 3: Cấu hình DNS trên Cloudflare
 
+Vì tên miền chính của bạn (`rankpush.xyz`) đang trỏ về một hosting khác, bạn cần tạo một **Subdomain** riêng cho hệ thống đặt phòng (ví dụ: `datphong.rankpush.xyz`).
+
 1. Vào **DNS** → **Records**
-2. Thêm record:
+2. Thêm record cho Subdomain:
 
 | Type | Name | Content | Proxy |
 |------|------|---------|-------|
-| A | `@` | `IP_SERVER` | ☁️ Proxied |
-| A | `www` | `IP_SERVER` | ☁️ Proxied |
+| A | `datphong` | `IP_SERVER_UBUNTU` | ☁️ Proxied |
 
-3. Đảm bảo **Proxy status** là ☁️ cam (Proxied), không phải DNS only
+*(Thay `datphong` bằng tên subdomain bạn muốn, và `IP_SERVER_UBUNTU` bằng IP của server chứa Docker)*
+
+3. Đảm bảo **Proxy status** là ☁️ cam (Proxied)
+
+> 💡 **Quan trọng**: Trong lúc chạy script `deploy-prod.sh`, khi được hỏi nhập `DOMAIN_NAME`, bạn phải nhập TÊN SUBDOMAIN: `datphong.rankpush.xyz` (không nhập `rankpush.xyz`).
 
 ## Bước 4: Cấu hình SSL mode
 
