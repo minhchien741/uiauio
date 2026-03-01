@@ -324,8 +324,8 @@ if [ -f "$ENV_FILE" ]; then
         echo -e "  ${RED}${BOLD}⚠️  CẢNH BÁO: Cấu hình lại sẽ RESET TOÀN BỘ SQL Server!${NC}"
         echo -e "  ${RED}   Tất cả dữ liệu trong database sẽ bị XÓA.${NC}"
         echo ""
-        read -p "  ❗ Xác nhận reset? (gõ 'RESET' để đồng ý): " CONFIRM_RESET
-        if [[ "$CONFIRM_RESET" == "RESET" ]]; then
+        read -p "  ❗ Xác nhận reset? (y/N): " CONFIRM_RESET
+        if [[ "$CONFIRM_RESET" =~ ^[Yy](es)?$ ]] || [[ "${CONFIRM_RESET^^}" == "RESET" ]]; then
             RESET_SQL=true
             log_warn "Sẽ reset SQL Server sau khi cấu hình xong."
             configure_env
