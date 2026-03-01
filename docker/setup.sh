@@ -19,13 +19,13 @@ echo ""
 # --- Kiem tra Docker ---
 if ! command -v docker &> /dev/null; then
     echo "❌ Docker chưa được cài đặt!"
-    echo "   Hãy chạy: sudo apt install -y docker.io docker-compose"
+    echo "   Hãy chạy: sudo apt install -y docker.io"
     exit 1
 fi
 
-if ! command -v docker-compose &> /dev/null; then
+if ! command -v docker compose &> /dev/null; then
     echo "❌ Docker Compose chưa được cài đặt!"
-    echo "   Hãy chạy: sudo apt install -y docker-compose"
+    echo "   Hãy chạy: sudo apt install -y docker.io"
     exit 1
 fi
 
@@ -73,7 +73,7 @@ if [ -f "$ENV_FILE" ]; then
         if [[ "$RUN_OLD" =~ ^[Yy]$ ]]; then
             echo ""
             echo "⏳ Đang build hệ thống..."
-            docker-compose -f "$SCRIPT_DIR/docker-compose.yml" up -d --build
+            docker compose -f "$SCRIPT_DIR/docker-compose.yml" up -d --build
             echo ""
             echo "🎉 Hệ thống đã khởi chạy!"
             echo "   🌐 Frontend:  http://localhost:${OLD_FE_PORT:-3000}"
@@ -211,7 +211,7 @@ if [[ "$CONFIRM" =~ ^[Yy]$ ]]; then
     echo ""
     echo "⏳ Đang build hệ thống... (có thể mất 3-5 phút lần đầu)"
     echo ""
-    docker-compose -f "$SCRIPT_DIR/docker-compose.yml" up -d --build
+    docker compose -f "$SCRIPT_DIR/docker-compose.yml" up -d --build
     echo ""
     echo "╔══════════════════════════════════════════════════╗"
     echo "║         🎉 TRIỂN KHAI THÀNH CÔNG!               ║"
@@ -220,15 +220,15 @@ if [[ "$CONFIRM" =~ ^[Yy]$ ]]; then
     printf "║  🌐 Frontend:  http://localhost:%-17s║\n" "$FE_PORT"
     printf "║  📡 Swagger:   http://localhost:%s/swagger\n" "$API_PORT"
     echo "║                                                  ║"
-    echo "║  📝 Xem log:  docker-compose -f docker/docker-compose.yml logs -f"
-    echo "║  🛑 Dừng:     docker-compose -f docker/docker-compose.yml down"
+    echo "║  📝 Xem log:  docker compose -f docker/docker-compose.yml logs -f"
+    echo "║  🛑 Dừng:     docker compose -f docker/docker-compose.yml down"
     echo "║                                                  ║"
     echo "╚══════════════════════════════════════════════════╝"
 else
     echo ""
     echo "⏸️  Đã lưu cấu hình vào docker/.env"
     echo "   Khi nào muốn chạy, hãy gõ:"
-    echo "   docker-compose -f docker/docker-compose.yml up -d --build"
+    echo "   docker compose -f docker/docker-compose.yml up -d --build"
 fi
 
 echo ""
