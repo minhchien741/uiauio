@@ -1,0 +1,30 @@
+# =============================================
+# Dockerfile cho .NET 9 Backend (RoomScheduling.API)
+# Build từ thư mục gốc của Solution:
+#   docker build -f docker/Dockerfile.backend -t room-backend .
+# =============================================
+
+# 1. Build stage — dùng SDK đầy đủ để build & publish
+FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+WORKDIR /src
+
+# Copy file csproj trước để tận dụng Docker cache layer
+COPY RoomScheduling.API/RoomScheduling.API.csproj             RoomScheduling.API/
+COPY RoomScheduling.Application/RoomScheduling.Application.csproj RoomScheduling.Application/
+COPY RoomScheduling.Domain/RoomScheduling.Domain.csproj       RoomScheduling.Domain/
+COPY RoomScheduling.Infrastructure/RoomScheduling.Infrastructure.csproj RoomScheduling.Infrastructure/
+
+RUN dotnet restore "RoomScheduling.API/RoomScheduling.API.csproj"
+
+# Copy toàn bộ mã nguồn còn lại
+COPY . .
+WORKDIR /src/RoomScheduling.API
+RUN dotnet publish "RoomScheduling.API.csproj" -c Release -o /app/publish
+
+# 2. Runtime stage — chỉ chứa runtime nhẹ
+FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS final
+WORKDIR /app
+COPY --from=build /app/publish .
+
+EXPOSE 8080
+ENTRYPOINT ["dotnet", "RoomScheduling.API.dll"]

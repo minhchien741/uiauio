@@ -1,0 +1,89 @@
+# =============================================
+# .gitignore — Room Scheduling System (ICTU)
+# =============================================
+
+# ========== .NET / C# ==========
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+*.csproj.user
+
+# NuGet
+*.nupkg
+**/packages/
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# Build results
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+build_err.txt
+
+# ========== Node.js / React / Vite ==========
+node_modules/
+dist/
+dist-server/
+*.tsbuildinfo
+.cache/
+
+# ========== Biến môi trường (QUAN TRỌNG — không push lên GitHub) ==========
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+docker/.env
+
+# ========== IDE & Editor ==========
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# ========== macOS ==========
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# ========== Windows ==========
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# ========== Docker ==========
+# Không ignore Dockerfile và docker-compose (cần thiết cho deploy)
+# Chỉ ignore volume data nếu có mount local
+docker/data/
+
+# ========== Database ==========
+*.mdf
+*.ldf
+*.ndf
+*.db
+*.sqlite
+
+# ========== Misc ==========
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.gemini/

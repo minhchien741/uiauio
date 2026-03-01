@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="RoomScheduling.API/RoomScheduling.API.csproj" />
+  <Project Path="RoomScheduling.Application/RoomScheduling.Application.csproj" />
+  <Project Path="RoomScheduling.Domain/RoomScheduling.Domain.csproj" />
+  <Project Path="RoomScheduling.Infrastructure/RoomScheduling.Infrastructure.csproj" />
+</Solution>

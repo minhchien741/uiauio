@@ -1,0 +1,135 @@
+@startuml UseCase_TongQuat
+!theme plain
+skinparam backgroundColor #FAFAFA
+skinparam actorStyle awesome
+skinparam usecaseBorderColor #4F46E5
+skinparam usecaseBackgroundColor #EEF2FF
+skinparam usecaseFontColor #1E1B4B
+skinparam arrowColor #64748B
+skinparam boundaryBorderColor #94A3B8
+skinparam actorFontColor #0F172A
+
+title Biểu đồ Use Case Tổng quát\nHệ thống Quản lý Lịch Phòng Học & Phòng Họp - ICTU
+
+' ==================== ACTORS ====================
+actor "Người dùng\n(Giảng viên / SV)" as User
+actor "Quản trị viên\n(Admin)" as Admin
+actor "Hệ thống\n(System / Hangfire)" as System <<system>>
+actor "Dịch vụ Email\n(SMTP)" as Email <<external>>
+
+' ==================== HỆ THỐNG CHÍNH ====================
+rectangle "Hệ thống Quản lý Lịch Phòng ICTU" {
+
+    ' --- NHÓM 1: Quản lý Tài khoản ---
+    package "UC1: Quản lý Tài khoản" {
+        usecase "UC1.1\nĐăng ký tài khoản" as UC_Register
+        usecase "UC1.2\nĐăng nhập" as UC_Login
+        usecase "UC1.3\nXem thông tin cá nhân" as UC_ViewProfile
+        usecase "UC1.4\nCập nhật thông tin cá nhân" as UC_UpdateProfile
+        usecase "UC1.5\nĐổi mật khẩu" as UC_ChangePwd
+    }
+
+    ' --- NHÓM 2: Đặt Phòng & Tìm Kiếm ---
+    package "UC2: Đặt Phòng & Tìm kiếm" {
+        usecase "UC2.1\nTìm phòng trống theo giờ" as UC_Search
+        usecase "UC2.2\nXem gợi ý phòng AI\n(Smart Suggestion)" as UC_AI
+        usecase "UC2.3\nĐặt phòng" as UC_Book
+        usecase "UC2.4\nĐặt phòng định kỳ\n(Recurring Booking)" as UC_Recurring
+        usecase "UC2.5\nHủy lịch đặt phòng" as UC_Cancel
+        usecase "UC2.6\nXem lịch sử đặt phòng" as UC_History
+    }
+
+    ' --- NHÓM 3: Phê duyệt & Quản trị ---
+    package "UC3: Phê duyệt & Quản trị (Admin)" {
+        usecase "UC3.1\nXem danh sách yêu cầu đặt phòng" as UC_ListReq
+        usecase "UC3.2\nPhê duyệt yêu cầu" as UC_Approve
+        usecase "UC3.3\nTừ chối yêu cầu\n(ghi lý do)" as UC_Reject
+        usecase "UC3.4\nThêm / Sửa / Xóa phòng" as UC_ManageRoom
+        usecase "UC3.5\nXem thống kê tổng quan" as UC_Stats
+    }
+
+    ' --- NHÓM 4: Thông báo ---
+    package "UC4: Thông báo & Lịch" {
+        usecase "UC4.1\nXem thông báo cá nhân" as UC_Notif
+        usecase "UC4.2\nĐánh dấu thông báo đã đọc" as UC_ReadNotif
+        usecase "UC4.3\nXem lịch phòng (Calendar)" as UC_Calendar
+        usecase "UC4.4\nCheck-out / Trả phòng sớm" as UC_Checkout
+    }
+
+    ' --- NHÓM 5: Kiểm soát Hệ thống ---
+    package "UC5: Kiểm soát Hệ thống (Auto)" {
+        usecase "UC5.1\nKiểm tra hạn mức\n(Quota 10h/tuần)" as UC_Quota
+        usecase "UC5.2\nTự động hủy lịch No-show\n(sau 15 phút không check-in)" as UC_NoShow
+        usecase "UC5.3\nKiểm tra trùng lịch" as UC_Conflict
+        usecase "UC5.4\nGửi email thông báo" as UC_Email
+    }
+}
+
+' ==================== LIÊN KẾT USER ====================
+User --> UC_Register
+User --> UC_Login
+User --> UC_ViewProfile
+User --> UC_UpdateProfile
+User --> UC_ChangePwd
+
+User --> UC_Search
+User --> UC_AI
+User --> UC_Book
+User --> UC_Recurring
+User --> UC_Cancel
+User --> UC_History
+
+User --> UC_Notif
+User --> UC_ReadNotif
+User --> UC_Calendar
+User --> UC_Checkout
+
+' ==================== LIÊN KẾT ADMIN ====================
+Admin --> UC_Login
+Admin --> UC_ViewProfile
+Admin --> UC_ListReq
+Admin --> UC_Approve
+Admin --> UC_Reject
+Admin --> UC_ManageRoom
+Admin --> UC_Stats
+Admin --> UC_Calendar
+Admin --> UC_Checkout
+
+' ==================== LIÊN KẾT SYSTEM ====================
+System --> UC_NoShow
+System --> UC_Quota
+
+' ==================== LIÊN KẾT EMAIL ====================
+Email --> UC_Email
+
+' ==================== INCLUDE / EXTEND ====================
+UC_Book ..> UC_Conflict : <<include>>
+UC_Book ..> UC_Quota : <<include>>
+UC_Recurring ..> UC_Book : <<include>>
+
+UC_Approve ..> UC_Email : <<include>>
+UC_Reject ..> UC_Email : <<include>>
+
+UC_Book ..> UC_AI : <<extend>>\nnếu phòng bận
+UC_NoShow ..> UC_Email : <<extend>>
+
+' ==================== GHI CHÚ ====================
+note top of UC_AI
+  Thuật toán Heuristic:
+  Chấm điểm theo Khoa (+40),
+  Sức chứa (+30), Từ khóa (+20),
+  Kích thước phù hợp (+10)
+end note
+
+note bottom of UC_Quota
+  Giới hạn: 10 giờ / tuần / người dùng.
+  Backend tự động từ chối nếu vượt quá.
+end note
+
+note right of System
+  Hangfire chạy nền
+  mỗi 10 phút tự động
+  quét và hủy lịch No-show
+end note
+
+@enduml

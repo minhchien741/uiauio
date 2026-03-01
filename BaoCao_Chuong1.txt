@@ -1,0 +1,508 @@
+================================================================================
+CHƯƠNG 1: CƠ SỞ LÝ THUYẾT VÀ CÔNG NGHỆ SỬ DỤNG
+================================================================================
+
+1.1. TỔNG QUAN VỀ HỆ THỐNG QUẢN LÝ LỊCH PHÒNG HỌC & PHÒNG HỌP
+───────────────────────────────────────────────────────────────────────────────
+
+1.1.1. Bài toán quản lý tài nguyên trong môi trường giáo dục
+
+Trong các cơ sở giáo dục đại học, việc điều phối và phân bổ tài nguyên cơ sở vật
+chất — đặc biệt là phòng học, phòng họp, và phòng thực hành — là một trong những
+bài toán hành chính mang tính phức tạp cao. Tại Trường Đại học Công nghệ Thông tin
+và Truyền thông Việt – Hàn (ICTU), các phòng thuộc các khoa khác nhau (Khoa Công
+nghệ thông tin, Khoa Kỹ thuật, Khoa Kinh tế...) thường được đặt theo hình thức thủ
+công: gửi email, liên lạc trực tiếp, hoặc ghi vào sổ. Hình thức này tiềm ẩn nhiều
+rủi ro như trùng lịch, mất thông tin, và thiếu khả năng kiểm soát tổng thể.
+
+Một hệ thống quản lý lịch phòng điện tử ra đời để giải quyết chính xác những bất
+cập trên. Thay vì phụ thuộc vào sự phối hợp bằng tay giữa người dùng và quản trị
+viên, hệ thống sẽ tự động hóa toàn bộ quy trình: từ gửi yêu cầu đặt phòng, kiểm
+tra tính khả dụng của phòng trong thời gian thực, phê duyệt hoặc từ chối yêu cầu,
+cho đến việc cảnh báo tự động khi người dùng không check-in đúng giờ.
+
+1.1.2. Vai trò của việc điều phối tài nguyên
+
+Điều phối tài nguyên (Resource Scheduling) là một lĩnh vực con của quản lý vận
+hành (Operations Management). Trong bối cảnh phần mềm, một hệ thống điều phối tài
+nguyên hiện đại cần đảm bảo các yếu tố cốt lõi sau:
+
+  a) Ngăn chặn xung đột lịch (Conflict Prevention):
+     Hệ thống phải kiểm tra theo thời gian thực xem một phòng đã có lịch trong
+     khung giờ yêu cầu hay chưa trước khi xác nhận đặt phòng. Điều này loại bỏ
+     hoàn toàn khả năng hai sự kiện cùng chiếm dụng một phòng.
+
+  b) Tối ưu hóa tài nguyên nhàn rỗi:
+     Hệ thống cần gợi ý phòng thay thế khi phòng yêu cầu bị bận, dựa trên sức
+     chứa, thiết bị, và mức độ phù hợp với người đặt. Trong đề tài này, thuật
+     toán gợi ý AI Heuristic sẽ đảm nhận vai trò đó, chấm điểm từng phòng trống
+     theo các tiêu chí: khoa quản lý, sức chứa, và từ khóa thiết bị.
+
+  c) Kiểm soát và phân quyền:
+     Không phải mọi người dùng đều có quyền đặt mọi loại phòng. Hệ thống cần
+     áp dụng mô hình phân quyền theo vai trò (RBAC) và phân quyền theo khoa —
+     chỉ giảng viên/sinh viên thuộc khoa sở hữu phòng mới được đặt phòng đó.
+
+  d) Hạn mức sử dụng (Quota Management):
+     Để tránh lạm dụng tài nguyên, hệ thống áp dụng hạn mức 10 giờ/tuần/người
+     dùng. Bất kỳ yêu cầu nào vượt quá hạn mức sẽ bị tự động từ chối.
+
+  e) Tự động hóa và cảnh báo (Automation & Alerting):
+     Hệ thống tích hợp cơ chế tự động hủy lịch (No-show cancelation) nếu người
+     đặt không check-in sau 15 phút kể từ giờ bắt đầu, cùng với hệ thống thông
+     báo đẩy real-time cho người dùng và quản trị viên.
+
+1.1.3. Phạm vi ứng dụng của hệ thống
+
+Hệ thống được phát triển theo mô hình Client-Server hai lớp, trong đó:
+  - Frontend (Giao diện người dùng): Ứng dụng web chạy trên nền React, hỗ trợ
+    giao diện phản hồi (responsive) trên cả máy tính và thiết bị di động.
+  - Backend (Server logic & Database): API RESTful xây dựng trên ASP.NET Core,
+    giao tiếp với cơ sở dữ liệu SQL Server thông qua Entity Framework Core.
+  - Cầu nối (Proxy layer): Máy chủ Node.js (Express) đóng vai trò BFF
+    (Backend-For-Frontend), chuyển đổi định dạng dữ liệu và xác thực JWT.
+
+Hệ thống phục vụ 3 nhóm người dùng chính:
+  (1) Người dùng thông thường (User): Giảng viên, sinh viên đặt phòng.
+  (2) Quản trị viên (Admin): Phê duyệt/từ chối yêu cầu, quản lý danh mục phòng.
+  (3) Hệ thống (System): Thực thi các tác vụ nền tự động (Hangfire background jobs).
+
+
+================================================================================
+
+1.2. KIẾN TRÚC CLEAN ARCHITECTURE
+───────────────────────────────────────────────────────────────────────────────
+
+1.2.1. Giới thiệu về Clean Architecture
+
+Clean Architecture (Kiến trúc Sạch) là một mô hình kiến trúc phần mềm được đề
+xuất bởi Robert C. Martin (Uncle Bob) vào năm 2012. Triết lý cốt lõi của kiến
+trúc này là:
+
+  "Chi tiết triển khai (database, UI, framework) phải phụ thuộc vào nghiệp vụ
+   (business logic), chứ KHÔNG phải ngược lại."
+
+Nguyên tắc này được hiện thực hóa thông qua quy tắc phụ thuộc một chiều (The
+Dependency Rule): mã nguồn tại các lớp bên ngoài có thể biết về các lớp bên
+trong, nhưng không chiều ngược lại.
+
+1.2.2. Kiến trúc 4 lớp trong hệ thống
+
+Trong hệ thống Quản lý lịch phòng ICTU, Clean Architecture được thực thi theo
+cấu trúc 4 dự án (project) riêng biệt trong cùng một Solution (.NET):
+
+  ┌──────────────────────────────────────────────────────────────────┐
+  │                    PRESENTATION LAYER                            │
+  │             RoomScheduling.API (ASP.NET Core Web API)            │
+  │   Controllers: PhongController, AccountController                │
+  │   Trách nhiệm: Nhận HTTP request, trả HTTP response, xác thực   │
+  ├──────────────────────────────────────────────────────────────────┤
+  │                  INFRASTRUCTURE LAYER                            │
+  │         RoomScheduling.Infrastructure (EF Core, SQL Server)      │
+  │   AppDbContext, Migrations, Seed Data                            │
+  │   Trách nhiệm: Truy cập CSDL, implement interface của lớp        │
+  │   Application, tích hợp dịch vụ bên thứ ba (SMTP)               │
+  ├──────────────────────────────────────────────────────────────────┤
+  │                  APPLICATION LAYER                               │
+  │             RoomScheduling.Application (Business Logic)          │
+  │   Services: LichService, EmailService                            │
+  │   Interfaces: IAppDbContext                                      │
+  │   Trách nhiệm: Điều phối nghiệp vụ, xử lý use-case cụ thể       │
+  ├──────────────────────────────────────────────────────────────────┤
+  │                    DOMAIN LAYER                                  │
+  │               RoomScheduling.Domain (Entities)                   │
+  │   Phong, NguoiDung, YeuCau, ThietBi, ThongBao                   │
+  │   Trách nhiệm: Định nghĩa thực thể nghiệp vụ và enum trạng thái │
+  └──────────────────────────────────────────────────────────────────┘
+            ↑ Mỗi lớp CHỈ phụ thuộc vào lớp bên trong nó ↑
+
+Chi tiết từng lớp:
+
+  a) Domain Layer — Trái tim của hệ thống
+     Chứa các Entity (thực thể) thuần túy như: Phong (phòng), NguoiDung (người
+     dùng), YeuCau (yêu cầu đặt phòng), ThietBi (thiết bị), ThongBao (thông báo).
+     Các lớp này không phụ thuộc bất kỳ framework hay thư viện ngoài nào. Đây là
+     lớp ổn định nhất trong toàn bộ hệ thống — thay đổi ở các lớp ngoài không ảnh
+     hưởng đến domain.
+
+  b) Application Layer — Xử lý nghiệp vụ
+     Định nghĩa interface IAppDbContext để tầng trên không cần biết chi tiết
+     triển khai của EF Core. Chứa hai service quan trọng:
+       - LichService: Kiểm tra trùng lịch, xử lý đặt phòng định kỳ, tự động
+         hủy lịch No-show.
+       - EmailService: Gửi email thông báo qua SMTP khi yêu cầu được duyệt hoặc
+         bị từ chối.
+
+  c) Infrastructure Layer — Kết nối thế giới bên ngoài
+     Cài đặt (implement) AppDbContext (kế thừa DbContext của EF Core), tạo bảng
+     dữ liệu qua Migration, và nạp dữ liệu mẫu (Seed Data) tự động khi khởi chạy.
+     Đây là lớp DUY NHẤT biết đến SQL Server.
+
+  d) API Layer — Cổng vào từ Internet
+     Các Controller (PhongController, AccountController) nhận HTTP request từ
+     frontend (hoặc từ Node.js proxy), gọi xuống các Service/IAppDbContext để
+     xử lý, rồi trả kết quả về dạng JSON. Tích hợp Swagger UI để tài liệu hóa
+     toàn bộ API tự động trong môi trường Development.
+
+1.2.3. Lợi ích của Clean Architecture trong dự án này
+
+  - Khả năng bảo trì cao: Logic nghiệp vụ (kiểm tra quota, trùng lịch, gợi ý AI)
+    tập trung ở lớp Application và API — có thể sửa đổi mà không ảnh hưởng đến
+    cấu trúc dữ liệu ở Domain.
+  - Dễ kiểm thử (Testability): Nhờ IAppDbContext và Dependency Injection, có thể
+    thay thế database thực bằng mock trong unit test mà không cần thay đổi code.
+  - Tách biệt mối quan tâm (Separation of Concerns): Mỗi lớp có trách nhiệm rõ
+    ràng và duy nhất, tuân thủ nguyên tắc Single Responsibility.
+  - Dễ mở rộng: Thay thế SQL Server bằng PostgreSQL chỉ cần đổi cấu hình ở lớp
+    Infrastructure mà không đụng chạm đến logic nghiệp vụ.
+
+
+================================================================================
+
+1.3. CÔNG NGHỆ BACKEND
+───────────────────────────────────────────────────────────────────────────────
+
+1.3.1. ASP.NET Core Web API
+
+ASP.NET Core là framework phát triển ứng dụng web mã nguồn mở, đa nền tảng
+(cross-platform) do Microsoft phát triển và duy trì. Trong hệ thống này, phiên bản
+.NET 9.0 được sử dụng — phiên bản LTS (Long-Term Support) mới nhất tính đến thời
+điểm phát triển.
+
+Lý do lựa chọn ASP.NET Core:
+
+  - Hiệu năng cao: Theo benchmark của TechEmpower, ASP.NET Core nằm trong nhóm
+    framework xử lý HTTP request nhanh nhất thế giới, tối ưu cho tải nhiều request
+    đồng thời trong môi trường đại học.
+  - Hỗ trợ RESTful API gốc (Native REST support): Routing, Model Binding, và HTTP
+    method mapping được tích hợp sẵn, giúp xây dựng các endpoint API theo chuẩn
+    REST một cách nhanh chóng và rõ ràng.
+    Ví dụ trong hệ thống:
+       GET  /api/Phong                    → Lấy danh sách tất cả phòng
+       POST /api/Phong/dat-phong          → Đặt phòng mới
+       GET  /api/Phong/goi-y-ai           → Gợi ý phòng bằng AI Heuristic
+       GET  /api/Phong/user/quota/{id}    → Kiểm tra hạn mức giờ trong tuần
+  - Dependency Injection (DI) tích hợp sẵn: Cho phép inject AppDbContext,
+    LichService, EmailService vào Controller một cách tường minh mà không cần
+    container bên thứ ba.
+  - Xử lý bất đồng bộ (Async/Await): Toàn bô các thao tác I/O (truy vấn database,
+    gửi email) đều được viết theo mô hình async/await, giúp server không bị chặn
+    (non-blocking) trong khi chờ phản hồi từ SQL Server.
+  - Tích hợp Swagger UI: Chỉ cần thêm package Swashbuckle, toàn bộ API được
+    tài liệu hóa và có thể test trực tiếp qua trình duyệt tại /swagger.
+
+1.3.2. Entity Framework Core (EF Core)
+
+Entity Framework Core là thư viện ORM (Object-Relational Mapper) chính thức của
+Microsoft, cho phép lập trình viên tương tác với cơ sở dữ liệu quan hệ bằng code
+C# thuần túy thay vì viết câu lệnh SQL thủ công.
+
+Tiếp cận Code-First được áp dụng trong dự án:
+
+  Bước 1 — Định nghĩa Entity (Domain Layer):
+    public class Phong
+    {
+        public int Id { get; set; }
+        public string Ten { get; set; }
+        public int SucChua { get; set; }
+        public string? MoTaThietBi { get; set; }
+        public string? KhoaQuanLy { get; set; }
+        public ICollection<YeuCau> YeuCaus { get; set; }
+    }
+
+  Bước 2 — Cấu hình DbContext (Infrastructure Layer):
+    Lớp AppDbContext kế thừa DbContext, khai báo các DbSet<T> tương ứng với từng
+    bảng trong SQL Server: Phongs, NguoiDungs, YeuCaus, ThietBis, ThongBaos.
+
+  Bước 3 — Migration và Seed Data:
+    Lệnh "dotnet ef migrations add" sinh ra các file Migration SQL tự động.
+    Khi ứng dụng khởi chạy, hệ thống tự động chạy Migration (auto-migrate),
+    sau đó nạp dữ liệu mẫu (Seed Data) gồm 20 phòng và 100 yêu cầu đặt phòng
+    ngẫu nhiên để phục vụ mục đích trình diễn và kiểm thử.
+
+Ưu điểm của EF Core trong dự án:
+  - Không cần viết câu lệnh SQL thủ công: Truy vấn LINQ như
+    _context.Phongs.Where(p => p.SucChua >= minCap).ToListAsync()
+    được EF Core dịch thành SQL tự động và tối ưu hóa.
+  - Xử lý quan hệ: EF Core tự động join bảng khi dùng .Include() để load
+    các navigation property (ví dụ: load danh sách YeuCau kèm thông tin Phong).
+  - ReferenceHandler.IgnoreCycles: Được cấu hình trong Program.cs để tránh
+    vòng lặp tham chiếu vô hạn khi serialize quan hệ hai chiều sang JSON.
+
+1.3.3. Hangfire — Background Job Processing
+
+Hangfire là thư viện .NET chuyên dụng cho việc thực thi các tác vụ nền
+(background jobs) một cách đáng tin cậy, có giao diện quản lý (Dashboard), và
+không cần cấu hình hạ tầng phức tạp.
+
+Trong hệ thống Quản lý lịch phòng, Hangfire được sử dụng cho:
+
+  Tác vụ Tự động hủy lịch No-show (NFR-09):
+    Cứ mỗi 10 phút, Hangfire gọi phương thức HuyLichNoShow() trong LichService:
+      - Quét toàn bộ các lịch có trạng thái "Đã duyệt" (Approved).
+      - Kiểm tra xem thời gian hiện tại đã quá 15 phút kể từ thời gian bắt đầu
+        chưa.
+      - Nếu có lịch nào thỏa điều kiện mà chưa check-in, hệ thống tự động đổi
+        trạng thái thành "Đã hủy" và ghi chú:
+        "Hệ thống tự động hủy do không có mặt quá 15 phút."
+      - Gửi thông báo nội hệ thống (ThongBao) cho người đặt.
+
+  Cấu hình trong Program.cs:
+    - services.AddHangfire(...) đăng ký Hangfire với SQL Server làm storage.
+    - RecurringJob.AddOrUpdate(..., Cron.MinuteInterval(10)) đặt lịch tự động.
+    - Hangfire Dashboard được mở tại /hangfire để Admin theo dõi các job.
+
+Hangfire đảm bảo tính bền vững (persistence): nếu server bị tắt đột ngột, các
+job chưa chạy sẽ được thực thi lại khi server khởi động lại — đây là điểm vượt
+trội so với Timer / HostedService thông thường.
+
+1.3.4. Node.js Express — BFF Proxy Layer
+
+Ngoài backend .NET, hệ thống còn sử dụng một lớp trung gian Node.js (Express)
+đóng vai trò BFF (Backend-For-Frontend):
+
+  - Nhận request dạng REST từ React (tiếng Anh, camelCase JSON).
+  - Thêm JWT token vào header Authorization trước khi gửi xuống .NET API.
+  - Dịch response từ .NET (tiếng Việt, PascalCase JSON) sang định dạng mà
+    React frontend mong đợi.
+  - Ẩn địa chỉ .NET backend khỏi browser, tăng cường bảo mật.
+
+Lưu ý: Sau khi refactoring theo Clean Architecture, toàn bộ business logic (tính
+quota, gợi ý AI, lọc từ khóa) đã được chuyển về .NET backend. Node.js hiện chỉ
+thuần túy là lớp proxy không chứa logic nghiệp vụ.
+
+
+================================================================================
+
+1.4. CÔNG NGHỆ FRONTEND
+───────────────────────────────────────────────────────────────────────────────
+
+1.4.1. ReactJS và Vite
+
+React là thư viện JavaScript mã nguồn mở do Meta (Facebook) phát triển, chuyên
+dụng cho việc xây dựng giao diện người dùng (UI) theo mô hình Component. React
+hoạt động theo cơ chế Virtual DOM, chỉ cập nhật đúng phần giao diện thay đổi
+thay vì render lại toàn bộ trang, giúp ứng dụng phản hồi nhanh.
+
+Vite là công cụ build hiện đại (build tool) thay thế cho Create React App truyền
+thống. Vite sử dụng ES Modules và native browser để phục vụ file trong môi trường
+Development một cách tức thì (HMR — Hot Module Replacement), giúp tốc độ khởi
+động và reload trong quá trình phát triển nhanh hơn đáng kể so với Webpack.
+
+Các tính năng React được sử dụng trong dự án:
+  - React Hooks (useState, useEffect): Quản lý trạng thái component và side
+    effects (fetch dữ liệu, auto-polling thông báo mỗi 15 giây...).
+  - React Router DOM: Định tuyến (routing) phía client-side, hỗ trợ các trang:
+    Dashboard, Rooms, Bookings, Calendar, Notifications, Profile, AdminRooms.
+  - Conditional Rendering: Hiển thị giao diện khác nhau cho Admin và User thông
+    thường dựa trên trường role lưu trong localStorage.
+
+1.4.2. TypeScript
+
+TypeScript là ngôn ngữ lập trình mã nguồn mở do Microsoft phát triển, là tập cha
+(superset) của JavaScript với hệ thống kiểu tĩnh (static typing). Toàn bộ frontend
+của hệ thống được viết bằng TypeScript (.tsx) để đảm bảo:
+
+  - Phát hiện lỗi sớm tại compile-time: Trình biên dịch tsc sẽ báo lỗi ngay nếu
+    truyền sai kiểu dữ liệu vào một hàm (ví dụ: truyền string vào tham số number),
+    thay vì để lỗi xảy ra ở runtime.
+  - Code tự tài liệu hóa (Self-documenting): Interface và type annotation giúp
+    lập trình viên (hoặc người đọc code) hiểu ngay format dữ liệu mà không cần
+    đọc tài liệu API riêng.
+  - Tích hợp tốt với IDE: VS Code cung cấp IntelliSense và auto-complete chính xác
+    dựa trên type definition, tăng tốc độ phát triển.
+
+1.4.3. CSS và thiết kế giao diện
+
+Hệ thống sử dụng Vanilla CSS với bộ biến CSS (CSS Custom Properties) được định
+nghĩa tập trung trong file index.css, bao gồm:
+  - Hệ màu sắc: --bg, --border, --text, --accent...
+  - Bộ Animation: .animate-in, .animate-in-2, .animate-in-3 tạo hiệu ứng
+    fade-in-up cho nội dung khi trang tải.
+  - Utility classes: .btn-gradient, .btn-secondary, .input-premium,
+    .page-card, .card-hover cho các thành phần tái sử dụng.
+
+Về mặt thẩm mỹ, giao diện áp dụng phong cách thiết kế hiện đại:
+  - Sidebar gradient tím đậm (Indigo/Violet) tạo điểm nhấn thương hiệu.
+  - Glassmorphism trên các card: background blur, border mờ, shadow nhiều lớp.
+  - Google Font "Be Vietnam Pro" đảm bảo hiển thị dấu tiếng Việt chuẩn xác.
+  - Biểu tượng vector từ thư viện Lucide React (Bell, Calendar, DoorOpen, ...).
+
+Các trang giao diện chính:
+  - Dashboard: Thống kê tổng quan, hiển thị quota tuần, lịch sắp diễn ra.
+  - Lịch đặt phòng (Bookings): Bảng dữ liệu có phân trang, lọc trạng thái,
+    lọc theo ngày, sắp xếp theo yêu cầu mới nhất lên đầu.
+  - Tìm phòng trống (RoomSearch): Form tìm phòng theo khung giờ + từ khóa
+    thiết bị, tích hợp hiển thị gợi ý AI Heuristic (top 3 phòng phù hợp nhất).
+  - Lịch phòng (Calendar): Giao diện lịch tháng hiển thị tất cả booking dạng
+    trực quan theo từng ngày.
+  - Thông báo (Notifications): Danh sách thông báo với chấm đỏ "X mới" trên
+    sidebar, tự động cập nhật mỗi 15 giây.
+  - Quản lý phòng (AdminRooms): Dành riêng cho Admin, cho phép thêm/sửa/xóa
+    phòng với modal form.
+
+1.4.4. Thư viện hỗ trợ Frontend
+
+  - react-hot-toast: Hiển thị thông báo toast popup (thành công, lỗi) ở góc
+    màn hình sau mỗi thao tác quan trọng (đặt phòng, duyệt, hủy, đổi mật khẩu).
+  - date-fns: Thư viện xử lý và định dạng ngày giờ nhẹ (lightweight), được dùng
+    để parse ISO date string và format sang dạng "dd/MM/yyyy HH:mm" hiển thị cho
+    người dùng Việt Nam.
+  - lucide-react: Bộ icon vector SVG tối giản, đồng nhất, tích hợp trực tiếp
+    vào React dưới dạng component.
+
+
+================================================================================
+
+1.5. KỸ THUẬT BỔ TRỢ
+───────────────────────────────────────────────────────────────────────────────
+
+1.5.1. BCrypt — Bảo mật mật khẩu
+
+BCrypt là thuật toán băm mật khẩu (password hashing) được thiết kế đặc biệt cho
+mục đích bảo mật thông tin xác thực người dùng, với phương pháp thêm muối (salt)
+tự động và chi phí tính toán điều chỉnh được (cost factor).
+
+Lý do BCrypt được ưu tiên hơn MD5 hay SHA-256:
+  - Chủ đích chậm (Intentionally slow): BCrypt được thiết kế để mất thời gian
+    đáng kể khi băm, làm cho tấn công brute-force và rainbow table trở nên bất
+    khả thi về mặt thời gian.
+  - Salt tự động: Mỗi lần băm, BCrypt tự động tạo một chuỗi ngẫu nhiên (salt)
+    và nhúng vào kết quả. Hai người dùng có cùng mật khẩu sẽ cho ra hai hash
+    hoàn toàn khác nhau, chống tấn công rainbow table.
+  - Work factor: Tham số cost (mặc định 10-12) quy định số vòng lặp xử lý.
+    Khi phần cứng mạnh hơn, chỉ cần tăng cost để duy trì độ bảo mật.
+
+Cách BCrypt được áp dụng trong hệ thống:
+  - Đăng ký (AccountController.Register):
+    string hashedPassword = BCrypt.Net.BCrypt.HashPassword(password);
+    → Mật khẩu người dùng nhập vào được băm TRƯỚC khi lưu vào bảng NguoiDungs.
+
+  - Đăng nhập (PhongController.Login):
+    bool isValid = BCrypt.Net.BCrypt.Verify(password, user.Password);
+    → Mật khẩu gõ vào được verify với hash trong database bằng hàm Verify(),
+    không bao giờ giải mã (decrypt) — điều này là đặc tính của hàm một chiều.
+
+  - Đổi mật khẩu (AccountController.ChangePassword):
+    Yêu cầu người dùng nhập đúng mật khẩu cũ (Verify) trước khi cho phép
+    đặt mật khẩu mới, tránh trường hợp ai đó chiếm quyền phiên và đổi mật khẩu.
+
+Tuân thủ NFR-01 và NFR-02 trong tài liệu yêu cầu: Không lưu mật khẩu dạng
+plain-text trong cơ sở dữ liệu.
+
+1.5.2. SMTP — Gửi email thông báo
+
+SMTP (Simple Mail Transfer Protocol) là giao thức chuẩn để gửi email qua Internet.
+Trong hệ thống này, EmailService đóng gói logic giao tiếp SMTP, được inject vào
+PhongController thông qua Dependency Injection.
+
+Chức năng gửi email được kích hoạt trong các trường hợp:
+  - Admin phê duyệt yêu cầu đặt phòng: Gửi email thông báo "Yêu cầu đặt phòng
+    của bạn đã được chấp thuận" kèm thông tin phòng và khung giờ.
+  - Admin từ chối yêu cầu: Gửi email kèm lý do từ chối để người dùng biết
+    và điều chỉnh yêu cầu.
+
+Cấu hình SMTP trong appsettings.json:
+  {
+    "EmailSettings": {
+      "Host": "smtp.mailtrap.io",
+      "Port": 587,
+      "Username": "...",
+      "Password": "...",
+      "From": "noreply@ictu-rooms.edu.vn"
+    }
+  }
+
+Môi trường phát triển sử dụng Mailtrap (smtp.mailtrap.io) — một dịch vụ sandbox
+email chặn tất cả email thực gửi ra ngoài, cho phép lập trình viên kiểm tra nội
+dung email an toàn mà không ảnh hưởng đến người dùng thật.
+
+Trong môi trường production thực tế, cấu hình có thể thay bằng:
+  - Gmail SMTP (smtp.gmail.com, port 587)
+  - Mailgun, SendGrid, hoặc SMTP server của trường ICTU
+
+Tuân thủ NFR-17 (Hỗ trợ gửi email qua SMTP) và FR-35 (Gửi email thông báo kết
+quả phê duyệt cho người dùng) trong tài liệu yêu cầu hệ thống.
+
+1.5.3. JWT — Xác thực và Phân quyền
+
+JSON Web Token (JWT) là chuẩn xác thực (authentication) dựa trên token, trong đó
+thông tin danh tính người dùng được đóng gói và ký số (sign) bằng thuật toán
+HMAC-SHA256.
+
+Trong hệ thống, JWT được tạo tại lớp Node.js Express sau khi đăng nhập thành công:
+  - Payload chứa: userId, username, role, department, dotnet_user_id.
+  - Token được ký bằng JWT_SECRET lưu trong biến môi trường (.env).
+  - Thời hạn (expiry): 8 giờ — phù hợp với một ca làm việc/học tập.
+
+Mọi request đến .NET API đều phải kèm theo header:
+  Authorization: Bearer <JWT_TOKEN>
+
+Phân quyền (Authorization):
+  - [Authorize] attribute trên các endpoint nhạy cảm ngăn truy cập không xác thực.
+  - Kiểm tra user.Role === "Admin" thủ công trong các endpoint quản trị
+    (phê duyệt, xóa phòng) để đảm bảo nguyên tắc Least Privilege.
+  - Phân quyền theo khoa (Department-based authorization) được thực hiện tại
+    tầng business logic: đối chiếu KhoaQuanLy của phòng với Khoa của người đặt.
+
+1.5.4. SQL Server và Entity Framework Migrations
+
+Microsoft SQL Server là hệ quản trị cơ sở dữ liệu quan hệ (RDBMS) cấp doanh
+nghiệp được sử dụng làm kho lưu trữ chính của toàn hệ thống. Mô hình dữ liệu
+quan hệ gồm 5 bảng chính:
+
+  ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+  │  NguoiDungs │────<│   YeuCaus   │>────│    Phongs   │
+  │  (Users)    │     │ (Bookings)  │     │   (Rooms)   │
+  └─────────────┘     └─────────────┘     └──────┬──────┘
+                                                 │
+                                          ┌──────┴──────┐
+                                          │   ThietBis  │
+                                          │  (Devices)  │
+                                          └─────────────┘
+  ┌─────────────────────────────────────────────────────┐
+  │              ThongBaos (Notifications)              │
+  │ (FK → NguoiDungs, quan hệ N-1 theo người nhận)     │
+  └─────────────────────────────────────────────────────┘
+
+Chuỗi kết nối được cấu hình trong appsettings.json:
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=...;Database=RoomScheduling;..."
+  }
+
+Tính năng Auto-Migration (NFR-13): Mỗi lần ứng dụng .NET khởi chạy, đoạn code
+trong Program.cs tự động:
+  1. Áp dụng Migration chưa chạy vào database.
+  2. Gọi DbInitializer.Seed() để kiểm tra và nạp dữ liệu mẫu nếu chưa có.
+
+Điều này đảm bảo rằng bất kỳ thành viên mới nào clone project về và chạy
+"dotnet run" đều có ngay một database đầy đủ cấu trúc và dữ liệu mẫu để phát triển
+và kiểm thử — không cần chạy script SQL thủ công.
+
+
+================================================================================
+
+KẾT LUẬN CHƯƠNG 1
+───────────────────────────────────────────────────────────────────────────────
+
+Chương 1 đã trình bày toàn bộ nền tảng lý thuyết và cơ sở công nghệ mà hệ thống
+Quản lý lịch phòng ICTU dựa vào. Từ việc phân tích bài toán điều phối tài nguyên
+trong môi trường giáo dục và các yêu cầu chức năng/phi chức năng, đến lựa chọn
+kiến trúc Clean Architecture để đảm bảo tính bền vững và bảo trì lâu dài.
+
+Bộ công nghệ được lựa chọn bao gồm:
+  - Backend: ASP.NET Core 9.0 + Entity Framework Core + Hangfire + SQL Server
+  - Frontend: React + TypeScript + Vite + CSS custom + react-hot-toast + date-fns
+  - Bảo mật: BCrypt (mật khẩu) + JWT (phiên đăng nhập) + RBAC (phân quyền)
+  - Tích hợp: SMTP email + Swagger API documentation
+  - Proxy: Node.js Express (BFF pattern)
+
+Tất cả các lựa chọn trên đều có cơ sở lý luận rõ ràng, đáp ứng đúng và đủ 39 yêu
+cầu chức năng (FR) và 19 yêu cầu phi chức năng (NFR) đã được xác định trong tài
+liệu phân tích hệ thống.
+
+Chương 2 tiếp theo sẽ đi sâu vào Phân tích hệ thống, mô tả chi tiết các Use Case,
+sơ đồ luồng dữ liệu (DFD), và thiết kế cơ sở dữ liệu dựa trên nền tảng lý thuyết
+đã đặt ra trong chương này.
+
+================================================================================

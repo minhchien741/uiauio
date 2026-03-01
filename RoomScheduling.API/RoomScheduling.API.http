@@ -1,0 +1,6 @@
+@RoomScheduling.API_HostAddress = http://localhost:5294
+
+GET {{RoomScheduling.API_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
