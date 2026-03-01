@@ -161,48 +161,57 @@ generate_nginx_conf() {
     local fe_target="frontend:3000"
     local be_target="backend:8080"
 
-    mkdir -p "$SCRIPT_DIR/nginx"
+    mkdir -p "$SCRIPT_DIR/nginx/ssl"
 
     cat > "$NGINX_CONF" << NGINXEOF
 # =============================================
 # Nginx Reverse Proxy — He thong Dat phong ICTU
+# SSL: Cloudflare Full (Strict) + Origin Certificate
 # Domain: $domain
 # Tao boi deploy-prod.sh luc $(date '+%Y-%m-%d %H:%M:%S')
 # =============================================
 
+# Redirect HTTP -> HTTPS
 server {
     listen 80;
     server_name ${domain};
+    return 301 https://\\\$host\\\$request_uri;
+}
 
-    # Let's Encrypt challenge
-    location /.well-known/acme-challenge/ {
-        root /var/www/certbot;
-    }
+# HTTPS — Cloudflare Origin Certificate
+server {
+    listen 443 ssl;
+    server_name ${domain};
+
+    ssl_certificate /etc/nginx/ssl/origin.pem;
+    ssl_certificate_key /etc/nginx/ssl/origin-key.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
 
     # Frontend (React)
     location / {
         proxy_pass http://${fe_target};
         proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Upgrade \\\$http_upgrade;
         proxy_set_header Connection 'upgrade';
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_cache_bypass \$http_upgrade;
+        proxy_set_header Host \\\$host;
+        proxy_set_header X-Real-IP \\\$remote_addr;
+        proxy_set_header X-Forwarded-For \\\$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \\\$scheme;
+        proxy_cache_bypass \\\$http_upgrade;
     }
 
     # Backend API
     location /api/ {
         proxy_pass http://${be_target}/api/;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Upgrade \\\$http_upgrade;
         proxy_set_header Connection 'upgrade';
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_cache_bypass \$http_upgrade;
+        proxy_set_header Host \\\$host;
+        proxy_set_header X-Real-IP \\\$remote_addr;
+        proxy_set_header X-Forwarded-For \\\$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \\\$scheme;
+        proxy_cache_bypass \\\$http_upgrade;
         client_max_body_size 50M;
     }
 
@@ -210,25 +219,25 @@ server {
     location /swagger {
         proxy_pass http://${be_target}/swagger;
         proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Host \\\$host;
+        proxy_set_header X-Real-IP \\\$remote_addr;
+        proxy_set_header X-Forwarded-For \\\$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \\\$scheme;
     }
 
     # Hangfire Dashboard
     location /hangfire {
         proxy_pass http://${be_target}/hangfire;
         proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Host \\\$host;
+        proxy_set_header X-Real-IP \\\$remote_addr;
+        proxy_set_header X-Forwarded-For \\\$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \\\$scheme;
     }
 }
 NGINXEOF
 
-    log_ok "Đã tạo cấu hình Nginx cho: $domain"
+    log_ok "Đã tạo cấu hình Nginx (SSL) cho: $domain"
 }
 
 # =============================================
@@ -353,6 +362,69 @@ if [ -n "$DOMAIN_NAME" ]; then
     generate_nginx_conf "$DOMAIN_NAME"
 else
     generate_nginx_conf "localhost"
+fi
+
+# Kiem tra file SSL cert
+SSL_DIR="$SCRIPT_DIR/nginx/ssl"
+mkdir -p "$SSL_DIR"
+
+if [ ! -f "$SSL_DIR/origin.pem" ] || [ ! -f "$SSL_DIR/origin-key.pem" ]; then
+    log_warn "Chưa có Cloudflare Origin Certificate!"
+    echo ""
+    read -p "  🔑 Nhập certificate ngay bây giờ? (y/N): " INPUT_CERT
+    if [[ "$INPUT_CERT" =~ ^[Yy]$ ]]; then
+        echo ""
+        echo -e "  ${BOLD}📜 Paste Origin Certificate${NC} (từ Cloudflare)"
+        echo -e "  ${CYAN}Paste toàn bộ nội dung (bao gồm BEGIN/END), rồi nhấn Enter 2 lần:${NC}"
+        echo ""
+        CERT_CONTENT=""
+        EMPTY_COUNT=0
+        while IFS= read -r line; do
+            if [ -z "$line" ]; then
+                EMPTY_COUNT=$((EMPTY_COUNT + 1))
+                if [ $EMPTY_COUNT -ge 1 ] && [ -n "$CERT_CONTENT" ]; then
+                    break
+                fi
+            else
+                EMPTY_COUNT=0
+            fi
+            CERT_CONTENT="${CERT_CONTENT}${line}"$'\n'
+        done
+        echo "$CERT_CONTENT" > "$SSL_DIR/origin.pem"
+        log_ok "Đã lưu Origin Certificate → docker/nginx/ssl/origin.pem"
+
+        echo ""
+        echo -e "  ${BOLD}🔐 Paste Private Key${NC} (từ Cloudflare)"
+        echo -e "  ${CYAN}Paste toàn bộ nội dung (bao gồm BEGIN/END), rồi nhấn Enter 2 lần:${NC}"
+        echo ""
+        KEY_CONTENT=""
+        EMPTY_COUNT=0
+        while IFS= read -r line; do
+            if [ -z "$line" ]; then
+                EMPTY_COUNT=$((EMPTY_COUNT + 1))
+                if [ $EMPTY_COUNT -ge 1 ] && [ -n "$KEY_CONTENT" ]; then
+                    break
+                fi
+            else
+                EMPTY_COUNT=0
+            fi
+            KEY_CONTENT="${KEY_CONTENT}${line}"$'\n'
+        done
+        echo "$KEY_CONTENT" > "$SSL_DIR/origin-key.pem"
+        chmod 600 "$SSL_DIR/origin-key.pem"
+        log_ok "Đã lưu Private Key → docker/nginx/ssl/origin-key.pem"
+    else
+        echo ""
+        log_info "Xem hướng dẫn: docker/CLOUDFLARE_SSL.md"
+        echo ""
+        read -p "  ⏭️  Tiếp tục không có SSL? (y/N): " SKIP_SSL
+        if [[ ! "$SKIP_SSL" =~ ^[Yy]$ ]]; then
+            log_err "Hủy. Hãy thêm cert rồi chạy lại script."
+            exit 1
+        fi
+    fi
+else
+    log_ok "Tìm thấy Cloudflare Origin Certificate"
 fi
 
 echo ""
@@ -525,133 +597,7 @@ fi
 echo ""
 
 # =============================================
-# BUOC 9: Cai SSL (neu co domain)
-# =============================================
-
-if [ -n "$DOMAIN_NAME" ]; then
-    print_step "🔒 Bước 9: Cài đặt SSL (Let's Encrypt)"
-
-    read -p "  🔒 Cài SSL cho $DOMAIN_NAME? (y/N): " INSTALL_SSL
-    if [[ "$INSTALL_SSL" =~ ^[Yy]$ ]]; then
-        read -p "  📧 Email cho Let's Encrypt (bắt buộc): " LE_EMAIL
-
-        if [ -n "$LE_EMAIL" ]; then
-            log_info "Đang xin chứng chỉ SSL..."
-
-            # Chay certbot trong Docker
-            docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" run --rm certbot \
-                certonly --webroot \
-                --webroot-path=/var/www/certbot \
-                -d "$DOMAIN_NAME" \
-                --email "$LE_EMAIL" \
-                --agree-tos \
-                --non-interactive
-
-            if [ $? -eq 0 ]; then
-                # Cap nhat nginx conf voi SSL
-                cat > "$NGINX_CONF" << SSLEOF
-# =============================================
-# Nginx Reverse Proxy + SSL — He thong Dat phong ICTU
-# Domain: $DOMAIN_NAME
-# =============================================
-
-# Redirect HTTP -> HTTPS
-server {
-    listen 80;
-    server_name ${DOMAIN_NAME};
-
-    location /.well-known/acme-challenge/ {
-        root /var/www/certbot;
-    }
-
-    location / {
-        return 301 https://\$host\$request_uri;
-    }
-}
-
-# HTTPS
-server {
-    listen 443 ssl;
-    server_name ${DOMAIN_NAME};
-
-    ssl_certificate /etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_NAME}/privkey.pem;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
-
-    # Frontend
-    location / {
-        proxy_pass http://frontend:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_cache_bypass \$http_upgrade;
-    }
-
-    # Backend API
-    location /api/ {
-        proxy_pass http://backend:8080/api/;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_cache_bypass \$http_upgrade;
-        client_max_body_size 50M;
-    }
-
-    # Swagger
-    location /swagger {
-        proxy_pass http://backend:8080/swagger;
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-
-    # Hangfire
-    location /hangfire {
-        proxy_pass http://backend:8080/hangfire;
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-}
-SSLEOF
-
-                # Reload Nginx voi SSL config moi
-                docker restart room_nginx
-
-                # Bat certbot auto-renew
-                docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" --profile ssl up -d certbot
-
-                log_ok "SSL đã cài đặt thành công! 🔒"
-                log_ok "Tự động gia hạn đã được kích hoạt"
-            else
-                log_warn "Không thể cài SSL tự động."
-                log_info "Thử thủ công sau khi DNS đã trỏ đúng."
-            fi
-        else
-            log_warn "Bỏ qua SSL — chưa nhập email"
-        fi
-    else
-        log_info "Bỏ qua SSL. Khi nào cần, chạy lại script này."
-    fi
-
-    echo ""
-fi
-
-# =============================================
-# BUOC 10: Ket qua
+# BUOC 9: Ket qua
 # =============================================
 
 # Kiem tra trang thai container
@@ -673,8 +619,13 @@ if $ALL_RUNNING; then
     echo -e "${GREEN}║${NC}         ${BOLD}🎉 TRIỂN KHAI PRODUCTION THÀNH CÔNG!${NC}              ${GREEN}║${NC}"
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════╣${NC}"
     echo -e "${GREEN}║${NC}                                                          ${GREEN}║${NC}"
-    printf  "${GREEN}║${NC}  🌐 Frontend:   http://%-35s${GREEN}║${NC}\n" "${DISPLAY_DOMAIN}"
-    printf  "${GREEN}║${NC}  📡 Swagger:    http://%-35s${GREEN}║${NC}\n" "${DISPLAY_DOMAIN}/swagger"
+    if [ -n "$DOMAIN_NAME" ]; then
+        printf  "${GREEN}║${NC}  🌐 Frontend:   https://%-34s${GREEN}║${NC}\n" "${DISPLAY_DOMAIN}"
+        printf  "${GREEN}║${NC}  📡 Swagger:    https://%-34s${GREEN}║${NC}\n" "${DISPLAY_DOMAIN}/swagger"
+    else
+        printf  "${GREEN}║${NC}  🌐 Frontend:   http://%-35s${GREEN}║${NC}\n" "${DISPLAY_DOMAIN}"
+        printf  "${GREEN}║${NC}  📡 Swagger:    http://%-35s${GREEN}║${NC}\n" "${DISPLAY_DOMAIN}/swagger"
+    fi
     printf  "${GREEN}║${NC}  🗄️  SQL Server: localhost:%-31s${GREEN}║${NC}\n" "${DB_PORT:-1433}"
     echo -e "${GREEN}║${NC}                                                          ${GREEN}║${NC}"
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════╣${NC}"
@@ -685,6 +636,13 @@ if $ALL_RUNNING; then
     echo -e "${GREEN}║${NC}                  docker-compose.prod.yml down             ${GREEN}║${NC}"
     echo -e "${GREEN}║${NC}  🔄 Restart:     sudo ./docker/deploy-prod.sh            ${GREEN}║${NC}"
     echo -e "${GREEN}║${NC}                                                          ${GREEN}║${NC}"
+    if [ -n "$DOMAIN_NAME" ]; then
+        echo -e "${GREEN}╠══════════════════════════════════════════════════════════╣${NC}"
+        echo -e "${GREEN}║${NC}  ${BOLD}Cloudflare SSL (Full Strict):${NC}                            ${GREEN}║${NC}"
+        echo -e "${GREEN}║${NC}  📖 Hướng dẫn:    docker/CLOUDFLARE_SSL.md               ${GREEN}║${NC}"
+        echo -e "${GREEN}║${NC}  🔑 Origin Cert:  docker/nginx/ssl/origin.pem            ${GREEN}║${NC}"
+        echo -e "${GREEN}║${NC}                                                          ${GREEN}║${NC}"
+    fi
     echo -e "${GREEN}╚══════════════════════════════════════════════════════════╝${NC}"
 else
     echo -e "${RED}╔══════════════════════════════════════════════════════════╗${NC}"
@@ -699,3 +657,4 @@ else
 fi
 
 echo ""
+
