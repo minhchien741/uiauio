@@ -24,6 +24,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 ENV_FILE="$SCRIPT_DIR/.env"
 COMPOSE_FILE="$SCRIPT_DIR/docker-compose.prod.yml"
+NGINX_CONF="$SCRIPT_DIR/nginx/default.conf"
+RESET_SQL=false
 
 # =============================================
 # Cac ham tien ich
@@ -47,71 +49,6 @@ log_ok()   { echo -e "  ${GREEN}✅ $1${NC}"; }
 log_warn() { echo -e "  ${YELLOW}⚠️  $1${NC}"; }
 log_err()  { echo -e "  ${RED}❌ $1${NC}"; }
 log_info() { echo -e "  ${CYAN}ℹ️  $1${NC}"; }
-
-# =============================================
-# BUOC 0: Kiem tra dieu kien tien quyet
-# =============================================
-
-print_header
-
-print_step "📋 Bước 0: Kiểm tra hệ thống"
-
-# Kiem tra quyen root
-if [[ $EUID -ne 0 ]]; then
-    log_warn "Khuyến nghị chạy với sudo để cài Docker tự động."
-    log_info "Nếu Docker đã cài sẵn, có thể bỏ qua."
-    echo ""
-fi
-
-# =============================================
-# BUOC 1: Cai Docker neu chua co
-# =============================================
-
-print_step "🐳 Bước 1: Kiểm tra & Cài đặt Docker"
-
-install_docker() {
-    log_info "Đang cài đặt Docker..."
-    apt-get update -qq
-    apt-get install -y -qq docker.io docker-compose-plugin > /dev/null 2>&1
-    systemctl start docker
-    systemctl enable docker
-    log_ok "Docker đã được cài đặt thành công!"
-}
-
-if command -v docker &> /dev/null; then
-    DOCKER_VERSION=$(docker --version | awk '{print $3}' | sed 's/,//')
-    log_ok "Docker đã cài: $DOCKER_VERSION"
-else
-    if [[ $EUID -eq 0 ]]; then
-        install_docker
-    else
-        log_err "Docker chưa được cài đặt!"
-        echo -e "     Chạy: ${BOLD}sudo apt install -y docker.io docker-compose-plugin${NC}"
-        exit 1
-    fi
-fi
-
-# Kiem tra docker compose
-if docker compose version &> /dev/null; then
-    log_ok "Docker Compose sẵn sàng"
-elif command -v docker-compose &> /dev/null; then
-    log_ok "Docker Compose (legacy) sẵn sàng"
-    # Alias cho scripts phia duoi
-    docker() {
-        if [[ "$1" == "compose" ]]; then
-            shift
-            command docker-compose "$@"
-        else
-            command docker "$@"
-        fi
-    }
-else
-    log_err "Docker Compose chưa được cài!"
-    echo -e "     Chạy: ${BOLD}sudo apt install -y docker-compose-plugin${NC}"
-    exit 1
-fi
-
-echo ""
 
 # =============================================
 # Ham cau hinh .env (phai khai bao truoc khi goi)
@@ -172,8 +109,8 @@ configure_env() {
 
     echo ""
 
-    # --- Nginx / Domain ---
-    read -p "  🌍 Tên miền (VD: datphong.ictu.edu.vn, Enter = bỏ qua): " DOMAIN_NAME
+    # --- Domain ---
+    read -p "  🌍 Tên miền (VD: datphong.ictu.edu.vn, Enter = dùng localhost): " DOMAIN_NAME
     DOMAIN_NAME=${DOMAIN_NAME:-""}
 
     # Ghi file .env
@@ -207,13 +144,156 @@ SMTP_USER=$SMTP_USER
 SMTP_PASS=$SMTP_PASS
 SMTP_FROM=$SMTP_FROM
 
-# --- Nginx / Domain ---
+# --- Domain ---
 DOMAIN_NAME=$DOMAIN_NAME
 EOF
 
     chmod 600 "$ENV_FILE"
     log_ok "Đã tạo file .env (quyền 600 — chỉ owner đọc được)"
 }
+
+# =============================================
+# Ham tao cau hinh Nginx
+# =============================================
+
+generate_nginx_conf() {
+    local domain=${1:-"localhost"}
+    local fe_target="frontend:3000"
+    local be_target="backend:8080"
+
+    mkdir -p "$SCRIPT_DIR/nginx"
+
+    cat > "$NGINX_CONF" << NGINXEOF
+# =============================================
+# Nginx Reverse Proxy — He thong Dat phong ICTU
+# Domain: $domain
+# Tao boi deploy-prod.sh luc $(date '+%Y-%m-%d %H:%M:%S')
+# =============================================
+
+server {
+    listen 80;
+    server_name ${domain};
+
+    # Let's Encrypt challenge
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    # Frontend (React)
+    location / {
+        proxy_pass http://${fe_target};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_cache_bypass \$http_upgrade;
+    }
+
+    # Backend API
+    location /api/ {
+        proxy_pass http://${be_target}/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_cache_bypass \$http_upgrade;
+        client_max_body_size 50M;
+    }
+
+    # Swagger UI
+    location /swagger {
+        proxy_pass http://${be_target}/swagger;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    # Hangfire Dashboard
+    location /hangfire {
+        proxy_pass http://${be_target}/hangfire;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+NGINXEOF
+
+    log_ok "Đã tạo cấu hình Nginx cho: $domain"
+}
+
+# =============================================
+# BUOC 0: Kiem tra dieu kien tien quyet
+# =============================================
+
+print_header
+
+print_step "📋 Bước 0: Kiểm tra hệ thống"
+
+# Kiem tra quyen root
+if [[ $EUID -ne 0 ]]; then
+    log_warn "Khuyến nghị chạy với sudo để cài Docker tự động."
+    log_info "Nếu Docker đã cài sẵn, có thể bỏ qua."
+    echo ""
+fi
+
+# =============================================
+# BUOC 1: Cai Docker neu chua co
+# =============================================
+
+print_step "🐳 Bước 1: Kiểm tra & Cài đặt Docker"
+
+install_docker() {
+    log_info "Đang cài đặt Docker..."
+    apt-get update -qq
+    apt-get install -y -qq docker.io docker-compose-plugin > /dev/null 2>&1
+    systemctl start docker
+    systemctl enable docker
+    log_ok "Docker đã được cài đặt thành công!"
+}
+
+if command -v docker &> /dev/null; then
+    DOCKER_VERSION=$(docker --version | awk '{print $3}' | sed 's/,//')
+    log_ok "Docker đã cài: $DOCKER_VERSION"
+else
+    if [[ $EUID -eq 0 ]]; then
+        install_docker
+    else
+        log_err "Docker chưa được cài đặt!"
+        echo -e "     Chạy: ${BOLD}sudo apt install -y docker.io docker-compose-plugin${NC}"
+        exit 1
+    fi
+fi
+
+# Kiem tra docker compose
+if docker compose version &> /dev/null; then
+    log_ok "Docker Compose sẵn sàng"
+elif command -v docker-compose &> /dev/null; then
+    log_ok "Docker Compose (legacy) sẵn sàng"
+    docker() {
+        if [[ "$1" == "compose" ]]; then
+            shift
+            command docker-compose "$@"
+        else
+            command docker "$@"
+        fi
+    }
+else
+    log_err "Docker Compose chưa được cài!"
+    echo -e "     Chạy: ${BOLD}sudo apt install -y docker-compose-plugin${NC}"
+    exit 1
+fi
+
+echo ""
 
 # =============================================
 # BUOC 2: Kiem tra / Tao file .env
@@ -225,7 +305,6 @@ if [ -f "$ENV_FILE" ]; then
     log_ok "Tìm thấy file .env hiện tại"
     echo ""
 
-    # Hien thi cau hinh hien tai
     source "$ENV_FILE"
     echo -e "  ${BOLD}Cấu hình hiện tại:${NC}"
     echo -e "  🔑 SQL Password:  ${MSSQL_SA_PASSWORD:0:4}****"
@@ -236,11 +315,23 @@ if [ -f "$ENV_FILE" ]; then
     echo -e "  🔐 JWT Secret:    ${JWT_SECRET:0:8}..."
     echo -e "  🤖 Gemini AI:     $([ -n "$GEMINI_API_KEY" ] && echo "Đã cấu hình ✅" || echo "Chưa đặt ⏭️")"
     echo -e "  📧 SMTP:          $([ -n "$SMTP_HOST" ] && echo "$SMTP_HOST ✅" || echo "Chưa đặt ⏭️")"
+    echo -e "  🌍 Domain:        $([ -n "$DOMAIN_NAME" ] && echo "$DOMAIN_NAME ✅" || echo "localhost")"
     echo ""
 
     read -p "  🔄 Cấu hình lại? (y/N): " RECONFIG
     if [[ "$RECONFIG" =~ ^[Yy]$ ]]; then
-        configure_env
+        echo ""
+        echo -e "  ${RED}${BOLD}⚠️  CẢNH BÁO: Cấu hình lại sẽ RESET TOÀN BỘ SQL Server!${NC}"
+        echo -e "  ${RED}   Tất cả dữ liệu trong database sẽ bị XÓA.${NC}"
+        echo ""
+        read -p "  ❗ Xác nhận reset? (gõ 'RESET' để đồng ý): " CONFIRM_RESET
+        if [[ "$CONFIRM_RESET" == "RESET" ]]; then
+            RESET_SQL=true
+            log_warn "Sẽ reset SQL Server sau khi cấu hình xong."
+            configure_env
+        else
+            log_info "Hủy cấu hình lại. Giữ nguyên .env cũ."
+        fi
     fi
 else
     log_warn "Chưa có file .env — Bắt đầu cấu hình..."
@@ -251,36 +342,23 @@ fi
 echo ""
 
 # =============================================
-# BUOC 3: Kiem tra cong dang dung
+# BUOC 3: Tao cau hinh Nginx
 # =============================================
 
-print_step "🔌 Bước 3: Kiểm tra cổng"
+print_step "🌐 Bước 3: Cấu hình Nginx (Docker)"
 
 source "$ENV_FILE"
 
-check_port() {
-    local port=$1
-    local name=$2
-    if ss -tlnp 2>/dev/null | grep -q ":${port} " || netstat -tlnp 2>/dev/null | grep -q ":${port} "; then
-        log_warn "Cổng $port ($name) đang được sử dụng!"
-        read -p "     Tiếp tục? Docker sẽ cố gắng bind lại (y/N): " CONT
-        if [[ ! "$CONT" =~ ^[Yy]$ ]]; then
-            log_err "Hủy bỏ. Hãy đổi cổng trong docker/.env"
-            exit 1
-        fi
-    else
-        log_ok "Cổng $port ($name) — Sẵn sàng"
-    fi
-}
-
-check_port "${DB_PORT:-1433}" "SQL Server"
-check_port "${API_PORT:-5114}" "Backend API"
-check_port "${FE_PORT:-3000}" "Frontend"
+if [ -n "$DOMAIN_NAME" ]; then
+    generate_nginx_conf "$DOMAIN_NAME"
+else
+    generate_nginx_conf "localhost"
+fi
 
 echo ""
 
 # =============================================
-# BUOC 4: Kiem tra disk space
+# BUOC 4: Kiem tra tai nguyen
 # =============================================
 
 print_step "💾 Bước 4: Kiểm tra tài nguyên"
@@ -310,16 +388,18 @@ echo ""
 print_step "📋 Bước 5: Xác nhận triển khai"
 
 echo ""
+DISPLAY_DOMAIN=${DOMAIN_NAME:-"localhost"}
 echo -e "${CYAN}╔══════════════════════════════════════════════════════════╗${NC}"
 echo -e "${CYAN}║${NC}              ${BOLD}📋 TÓM TẮT CẤU HÌNH${NC}                        ${CYAN}║${NC}"
 echo -e "${CYAN}╠══════════════════════════════════════════════════════════╣${NC}"
 printf "${CYAN}║${NC}  🗄️  SQL Server:     localhost:%-26s${CYAN}║${NC}\n" "${DB_PORT:-1433}"
-printf "${CYAN}║${NC}  📡 Backend API:    http://localhost:%-20s${CYAN}║${NC}\n" "${API_PORT:-5114}"
-printf "${CYAN}║${NC}  🌐 Frontend:       http://localhost:%-20s${CYAN}║${NC}\n" "${FE_PORT:-3000}"
-printf "${CYAN}║${NC}  📡 Swagger UI:     http://localhost:%s/swagger\n" "${API_PORT:-5114}"
+printf "${CYAN}║${NC}  🌐 Frontend:       http://%-30s${CYAN}║${NC}\n" "${DISPLAY_DOMAIN}"
+printf "${CYAN}║${NC}  📡 Swagger:        http://%-30s${CYAN}║${NC}\n" "${DISPLAY_DOMAIN}/swagger"
 printf "${CYAN}║${NC}  🤖 Gemini AI:      %-37s${CYAN}║${NC}\n" "$([ -n "$GEMINI_API_KEY" ] && echo "Đã cấu hình ✅" || echo "Tắt ⏭️")"
 printf "${CYAN}║${NC}  📧 Email SMTP:     %-37s${CYAN}║${NC}\n" "$([ -n "$SMTP_HOST" ] && echo "$SMTP_HOST ✅" || echo "Tắt ⏭️")"
-printf "${CYAN}║${NC}  🌍 Tên miền:       %-37s${CYAN}║${NC}\n" "$([ -n "$DOMAIN_NAME" ] && echo "$DOMAIN_NAME ✅" || echo "Không dùng Nginx ⏭️")"
+if $RESET_SQL; then
+    echo -e "${CYAN}║${NC}  ${RED}🗑️  SQL Reset:      CÓ — Xóa toàn bộ dữ liệu cũ${NC}       ${CYAN}║${NC}"
+fi
 echo -e "${CYAN}╚══════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -333,18 +413,25 @@ if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
 fi
 
 # =============================================
-# BUOC 6: Dung container cu (neu co)
+# BUOC 6: Dung container cu & reset SQL neu can
 # =============================================
 
 echo ""
-print_step "🛑 Bước 6: Dọn dẹp container cũ (nếu có)"
+print_step "🛑 Bước 6: Dọn dẹp container cũ"
 
 if docker ps -a --format '{{.Names}}' | grep -q "room_"; then
     log_info "Đang dừng container cũ..."
     docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" down 2>/dev/null || true
-    log_ok "Đã dọn dẹp container cũ"
-else
-    log_ok "Không có container cũ"
+    log_ok "Đã dừng container cũ"
+fi
+
+if $RESET_SQL; then
+    echo ""
+    log_warn "Đang xóa volume SQL Server (reset toàn bộ dữ liệu)..."
+    docker volume rm "$(basename "$SCRIPT_DIR")_sql_data" 2>/dev/null || \
+    docker volume rm "docker_sql_data" 2>/dev/null || \
+    docker volume ls -q | grep sql_data | xargs -r docker volume rm 2>/dev/null || true
+    log_ok "Đã reset SQL Server volume"
 fi
 
 echo ""
@@ -359,7 +446,6 @@ echo ""
 log_info "Đang build images..."
 echo ""
 
-# Build va chay
 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build
 
 echo ""
@@ -372,7 +458,7 @@ print_step "⏳ Bước 8: Đợi hệ thống khởi động"
 
 # Doi SQL Server healthy
 echo -n "  ⏳ SQL Server: "
-for i in {1..60}; do
+for i in $(seq 1 60); do
     STATUS=$(docker inspect --format='{{.State.Health.Status}}' room_mssql 2>/dev/null || echo "waiting")
     if [ "$STATUS" = "healthy" ]; then
         echo -e "${GREEN}healthy ✅${NC}"
@@ -387,83 +473,115 @@ fi
 
 # Doi Backend
 echo -n "  ⏳ Backend API: "
-for i in {1..30}; do
-    if curl -s -o /dev/null -w "%{http_code}" "http://localhost:${API_PORT:-5114}/swagger/index.html" 2>/dev/null | grep -q "200"; then
+BE_READY=false
+for i in $(seq 1 30); do
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:${API_PORT:-5114}/swagger/index.html" 2>/dev/null || echo "000")
+    if [ "$HTTP_CODE" = "200" ]; then
         echo -e "${GREEN}ready ✅${NC}"
+        BE_READY=true
         break
     fi
     echo -n "."
     sleep 2
 done
-if [ "$i" -eq 30 ]; then
+if ! $BE_READY; then
     echo -e "${YELLOW}đang khởi động...${NC}"
 fi
 
 # Doi Frontend
 echo -n "  ⏳ Frontend:    "
-for i in {1..20}; do
-    if curl -s -o /dev/null -w "%{http_code}" "http://localhost:${FE_PORT:-3000}" 2>/dev/null | grep -q "200"; then
+FE_READY=false
+for i in $(seq 1 20); do
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:${FE_PORT:-3000}" 2>/dev/null || echo "000")
+    if [ "$HTTP_CODE" = "200" ]; then
         echo -e "${GREEN}ready ✅${NC}"
+        FE_READY=true
         break
     fi
     echo -n "."
     sleep 2
 done
-if [ "$i" -eq 20 ]; then
+if ! $FE_READY; then
+    echo -e "${YELLOW}đang khởi động...${NC}"
+fi
+
+# Doi Nginx
+echo -n "  ⏳ Nginx:       "
+NG_READY=false
+for i in $(seq 1 10); do
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:80" 2>/dev/null || echo "000")
+    if [ "$HTTP_CODE" != "000" ]; then
+        echo -e "${GREEN}ready ✅${NC}"
+        NG_READY=true
+        break
+    fi
+    echo -n "."
+    sleep 2
+done
+if ! $NG_READY; then
     echo -e "${YELLOW}đang khởi động...${NC}"
 fi
 
 echo ""
 
 # =============================================
-# BUOC 9: Cau hinh Nginx (neu co domain)
+# BUOC 9: Cai SSL (neu co domain)
 # =============================================
 
 if [ -n "$DOMAIN_NAME" ]; then
-    print_step "🌐 Bước 9: Cấu hình Nginx Reverse Proxy"
+    print_step "🔒 Bước 9: Cài đặt SSL (Let's Encrypt)"
 
-    # Cai Nginx neu chua co
-    if ! command -v nginx &> /dev/null; then
-        if [[ $EUID -eq 0 ]]; then
-            log_info "Đang cài đặt Nginx..."
-            apt-get install -y -qq nginx > /dev/null 2>&1
-            systemctl enable nginx
-            log_ok "Nginx đã cài đặt"
-        else
-            log_err "Nginx chưa được cài. Chạy: sudo apt install -y nginx"
-        fi
-    else
-        log_ok "Nginx đã có sẵn"
-    fi
+    read -p "  🔒 Cài SSL cho $DOMAIN_NAME? (y/N): " INSTALL_SSL
+    if [[ "$INSTALL_SSL" =~ ^[Yy]$ ]]; then
+        read -p "  📧 Email cho Let's Encrypt (bắt buộc): " LE_EMAIL
 
-    # Tao file cau hinh Nginx
-    NGINX_CONF="/etc/nginx/sites-available/roomscheduling"
-    NGINX_LINK="/etc/nginx/sites-enabled/roomscheduling"
-    OVERWRITE_NGINX=""
+        if [ -n "$LE_EMAIL" ]; then
+            log_info "Đang xin chứng chỉ SSL..."
 
-    if [ -f "$NGINX_CONF" ]; then
-        log_warn "File cấu hình Nginx đã tồn tại: $NGINX_CONF"
-        read -p "     Ghi đè? (y/N): " OVERWRITE_NGINX
-        if [[ ! "$OVERWRITE_NGINX" =~ ^[Yy]$ ]]; then
-            log_info "Giữ nguyên cấu hình Nginx cũ"
-        fi
-    fi
+            # Chay certbot trong Docker
+            docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" run --rm certbot \
+                certonly --webroot \
+                --webroot-path=/var/www/certbot \
+                -d "$DOMAIN_NAME" \
+                --email "$LE_EMAIL" \
+                --agree-tos \
+                --non-interactive
 
-    if [ ! -f "$NGINX_CONF" ] || [[ "$OVERWRITE_NGINX" =~ ^[Yy]$ ]]; then
-        cat > "$NGINX_CONF" << NGINXEOF
+            if [ $? -eq 0 ]; then
+                # Cap nhat nginx conf voi SSL
+                cat > "$NGINX_CONF" << SSLEOF
 # =============================================
-# Nginx Reverse Proxy — He thong Dat phong ICTU
-# Tao boi deploy-prod.sh luc $(date '+%Y-%m-%d %H:%M:%S')
+# Nginx Reverse Proxy + SSL — He thong Dat phong ICTU
 # Domain: $DOMAIN_NAME
 # =============================================
 
-# --- Frontend (React) ---
+# Redirect HTTP -> HTTPS
 server {
     listen 80;
     server_name ${DOMAIN_NAME};
 
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
     location / {
-        proxy_pass http://127.0.0.1:${FE_PORT:-3000};
+        return 301 https://\$host\$request_uri;
+    }
+}
+
+# HTTPS
+server {
+    listen 443 ssl;
+    server_name ${DOMAIN_NAME};
+
+    ssl_certificate /etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN_NAME}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    # Frontend
+    location / {
+        proxy_pass http://frontend:3000;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -473,15 +591,10 @@ server {
         proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_cache_bypass \$http_upgrade;
     }
-}
 
-# --- Backend API ---
-server {
-    listen 80;
-    server_name api.${DOMAIN_NAME};
-
-    location / {
-        proxy_pass http://127.0.0.1:${API_PORT:-5114};
+    # Backend API
+    location /api/ {
+        proxy_pass http://backend:8080/api/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -490,80 +603,48 @@ server {
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_cache_bypass \$http_upgrade;
-
-        # Cho phep upload file lon
         client_max_body_size 50M;
     }
+
+    # Swagger
+    location /swagger {
+        proxy_pass http://backend:8080/swagger;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    # Hangfire
+    location /hangfire {
+        proxy_pass http://backend:8080/hangfire;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
 }
-NGINXEOF
+SSLEOF
 
-        log_ok "Đã tạo cấu hình Nginx: $NGINX_CONF"
+                # Reload Nginx voi SSL config moi
+                docker restart room_nginx
 
-        # Tao symlink
-        if [ ! -L "$NGINX_LINK" ]; then
-            ln -sf "$NGINX_CONF" "$NGINX_LINK"
-            log_ok "Đã kích hoạt site trong sites-enabled"
-        fi
+                # Bat certbot auto-renew
+                docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" --profile ssl up -d certbot
 
-        # Xoa default site neu ton tai
-        if [ -L "/etc/nginx/sites-enabled/default" ]; then
-            rm -f /etc/nginx/sites-enabled/default
-            log_info "Đã tắt site mặc định của Nginx"
-        fi
-
-        # Kiem tra cau hinh Nginx
-        if nginx -t 2>/dev/null; then
-            log_ok "Cấu hình Nginx hợp lệ"
-            systemctl reload nginx 2>/dev/null || systemctl restart nginx
-            log_ok "Nginx đã reload"
+                log_ok "SSL đã cài đặt thành công! 🔒"
+                log_ok "Tự động gia hạn đã được kích hoạt"
+            else
+                log_warn "Không thể cài SSL tự động."
+                log_info "Thử thủ công sau khi DNS đã trỏ đúng."
+            fi
         else
-            log_err "Cấu hình Nginx có lỗi! Kiểm tra: sudo nginx -t"
-        fi
-    fi
-
-    echo ""
-
-    # --- SSL Let's Encrypt ---
-    read -p "  🔒 Cài SSL (Let's Encrypt) cho $DOMAIN_NAME? (y/N): " INSTALL_SSL
-    if [[ "$INSTALL_SSL" =~ ^[Yy]$ ]]; then
-        if ! command -v certbot &> /dev/null; then
-            if [[ $EUID -eq 0 ]]; then
-                log_info "Đang cài Certbot..."
-                apt-get install -y -qq certbot python3-certbot-nginx > /dev/null 2>&1
-                log_ok "Certbot đã cài đặt"
-            else
-                log_err "Certbot chưa cài. Chạy: sudo apt install -y certbot python3-certbot-nginx"
-            fi
-        fi
-
-        if command -v certbot &> /dev/null; then
-            echo ""
-            log_info "Đang xin chứng chỉ SSL cho $DOMAIN_NAME..."
-            read -p "  📧 Email cho Let's Encrypt (bắt buộc): " LE_EMAIL
-
-            if [ -n "$LE_EMAIL" ]; then
-                certbot --nginx \
-                    -d "$DOMAIN_NAME" \
-                    -d "api.$DOMAIN_NAME" \
-                    --email "$LE_EMAIL" \
-                    --agree-tos \
-                    --non-interactive \
-                    --redirect
-
-                if [ $? -eq 0 ]; then
-                    log_ok "SSL đã cài đặt thành công! 🔒"
-                    log_ok "Tự động gia hạn đã được kích hoạt (certbot renew)"
-                else
-                    log_warn "Không thể cài SSL tự động."
-                    log_info "Thử thủ công: sudo certbot --nginx -d $DOMAIN_NAME"
-                fi
-            else
-                log_warn "Bỏ qua SSL — chưa nhập email"
-            fi
+            log_warn "Bỏ qua SSL — chưa nhập email"
         fi
     else
-        log_info "Bỏ qua SSL. Khi nào cần, chạy:"
-        echo -e "     ${BOLD}sudo certbot --nginx -d $DOMAIN_NAME -d api.$DOMAIN_NAME${NC}"
+        log_info "Bỏ qua SSL. Khi nào cần, chạy lại script này."
     fi
 
     echo ""
@@ -575,7 +656,7 @@ fi
 
 # Kiem tra trang thai container
 ALL_RUNNING=true
-for CONTAINER in room_mssql room_backend room_frontend; do
+for CONTAINER in room_mssql room_backend room_frontend room_nginx; do
     STATUS=$(docker inspect --format='{{.State.Status}}' "$CONTAINER" 2>/dev/null || echo "not found")
     if [ "$STATUS" != "running" ]; then
         ALL_RUNNING=false
@@ -585,23 +666,21 @@ done
 
 echo ""
 
+DISPLAY_DOMAIN=${DOMAIN_NAME:-"localhost"}
+
 if $ALL_RUNNING; then
     echo -e "${GREEN}╔══════════════════════════════════════════════════════════╗${NC}"
     echo -e "${GREEN}║${NC}         ${BOLD}🎉 TRIỂN KHAI PRODUCTION THÀNH CÔNG!${NC}              ${GREEN}║${NC}"
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════╣${NC}"
     echo -e "${GREEN}║${NC}                                                          ${GREEN}║${NC}"
-    if [ -n "$DOMAIN_NAME" ]; then
-        printf  "${GREEN}║${NC}  🌐 Frontend:   http://%-35s${GREEN}║${NC}\n" "$DOMAIN_NAME"
-        printf  "${GREEN}║${NC}  📡 Swagger:    http://api.%-31s${GREEN}║${NC}\n" "$DOMAIN_NAME/swagger"
-    else
-        printf  "${GREEN}║${NC}  🌐 Frontend:   http://localhost:%-24s${GREEN}║${NC}\n" "${FE_PORT:-3000}"
-        printf  "${GREEN}║${NC}  📡 Swagger:    http://localhost:%-24s${GREEN}║${NC}\n" "${API_PORT:-5114}/swagger"
-    fi
+    printf  "${GREEN}║${NC}  🌐 Frontend:   http://%-35s${GREEN}║${NC}\n" "${DISPLAY_DOMAIN}"
+    printf  "${GREEN}║${NC}  📡 Swagger:    http://%-35s${GREEN}║${NC}\n" "${DISPLAY_DOMAIN}/swagger"
     printf  "${GREEN}║${NC}  🗄️  SQL Server: localhost:%-31s${GREEN}║${NC}\n" "${DB_PORT:-1433}"
     echo -e "${GREEN}║${NC}                                                          ${GREEN}║${NC}"
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════╣${NC}"
     echo -e "${GREEN}║${NC}  ${BOLD}Lệnh hữu ích:${NC}                                          ${GREEN}║${NC}"
     echo -e "${GREEN}║${NC}  📝 Xem log:     docker logs room_backend -f             ${GREEN}║${NC}"
+    echo -e "${GREEN}║${NC}  📝 Log Nginx:   docker logs room_nginx -f               ${GREEN}║${NC}"
     echo -e "${GREEN}║${NC}  🛑 Dừng:        docker compose -f docker/               ${GREEN}║${NC}"
     echo -e "${GREEN}║${NC}                  docker-compose.prod.yml down             ${GREEN}║${NC}"
     echo -e "${GREEN}║${NC}  🔄 Restart:     sudo ./docker/deploy-prod.sh            ${GREEN}║${NC}"
@@ -616,6 +695,7 @@ else
     echo -e "     ${BOLD}docker logs room_mssql${NC}"
     echo -e "     ${BOLD}docker logs room_backend${NC}"
     echo -e "     ${BOLD}docker logs room_frontend${NC}"
+    echo -e "     ${BOLD}docker logs room_nginx${NC}"
 fi
 
 echo ""
