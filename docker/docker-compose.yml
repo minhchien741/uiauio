@@ -1,12 +1,7 @@
-# =============================================
-# Docker Compose — Hệ thống Đặt phòng ICTU
-# Chạy: docker-compose -f docker/docker-compose.yml up -d --build
-# =============================================
-
-version: '3.8'
+# Docker Compose - He thong Dat phong ICTU
+# Chay: docker-compose -f docker/docker-compose.yml up -d --build
 
 services:
-  # ===== 1. Cơ sở dữ liệu SQL Server =====
   db:
     image: mcr.microsoft.com/mssql/server:2022-latest
     container_name: room_mssql
@@ -25,10 +20,9 @@ services:
       retries: 10
       start_period: 30s
 
-  # ===== 2. .NET 9 Backend API =====
   backend:
     build:
-      context: ..              # Trỏ context về thư mục gốc (ngang hàng .sln)
+      context: ..
       dockerfile: docker/Dockerfile.backend
     container_name: room_backend
     restart: unless-stopped
@@ -42,10 +36,9 @@ services:
     ports:
       - "5114:8080"
 
-  # ===== 3. Frontend React + Node.js Proxy =====
   frontend:
     build:
-      context: ../room-scheduling-interface  # Trỏ context vào thư mục frontend
+      context: ../room-scheduling-interface
       dockerfile: ../docker/Dockerfile.frontend
     container_name: room_frontend
     restart: unless-stopped
@@ -56,7 +49,7 @@ services:
       - PORT=3000
       - DOTNET_API=http://backend:8080
       - JWT_SECRET=your_jwt_secret_here
-      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_API_KEY=
     ports:
       - "3000:3000"
 
