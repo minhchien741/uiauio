@@ -2,8 +2,13 @@ import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Cho phép Node.js fetch kết nối HTTPS localhost với self-signed certificate (chỉ dùng trong dev)
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
@@ -507,7 +512,6 @@ Hãy trả lời khách dựa trên dữ liệu hệ thống trên. Nếu hỏi 
     });
 
     // ======== PHỤC VỤ FILE TĨNH FRONTEND ========
-    const path = require('path');
     const distPath = path.join(__dirname, 'dist');
     app.use(express.static(distPath));
 
