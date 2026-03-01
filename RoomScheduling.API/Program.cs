@@ -45,19 +45,6 @@ app.UseHttpsRedirection();
 app.UseAuthorization();
 // 1. Sau dòng app.UseAuthorization();
 app.UseHangfireDashboard(); // Đường dẫn /hangfire để bạn theo dõi các job ngầm
-// Đăng ký job quét lịch mỗi 10 phút
-using (var scope = app.Services.CreateScope())
-{
-    var recurringJobManager = scope.ServiceProvider.GetService<IRecurringJobManager>();
-    if (recurringJobManager != null)
-    {
-        recurringJobManager.AddOrUpdate<RoomCleanupService>(
-            "auto-cancel-no-show",
-            service => service.AutoCancelNoShow(),
-            "*/10 * * * *" // Chạy mỗi 10 phút
-        );
-    }
-}
 app.MapControllers();
 
 // 6. Tự động Migration và nạp 20 phòng, 100 yêu cầu mẫu (PI 4.2)
@@ -74,6 +61,20 @@ using (var scope = app.Services.CreateScope())
     {
         var logger = services.GetRequiredService<ILogger<Program>>();
         logger.LogError(ex, "Đã xảy ra lỗi khi Migration hoặc Seed dữ liệu.");
+    }
+}
+
+// 7. Đăng ký Hangfire recurring job SAU khi migration xong (database đã tồn tại)
+using (var scope = app.Services.CreateScope())
+{
+    var recurringJobManager = scope.ServiceProvider.GetService<IRecurringJobManager>();
+    if (recurringJobManager != null)
+    {
+        recurringJobManager.AddOrUpdate<RoomCleanupService>(
+            "auto-cancel-no-show",
+            service => service.AutoCancelNoShow(),
+            "*/10 * * * *" // Chạy mỗi 10 phút
+        );
     }
 }
 
