@@ -65,16 +65,30 @@ using (var scope = app.Services.CreateScope())
 }
 
 // 7. Đăng ký Hangfire recurring job SAU khi migration xong (database đã tồn tại)
+// Retry vì Hangfire schema có thể chưa cài xong
 using (var scope = app.Services.CreateScope())
 {
     var recurringJobManager = scope.ServiceProvider.GetService<IRecurringJobManager>();
     if (recurringJobManager != null)
     {
-        recurringJobManager.AddOrUpdate<RoomCleanupService>(
-            "auto-cancel-no-show",
-            service => service.AutoCancelNoShow(),
-            "*/10 * * * *" // Chạy mỗi 10 phút
-        );
+        for (int attempt = 1; attempt <= 3; attempt++)
+        {
+            try
+            {
+                recurringJobManager.AddOrUpdate<RoomCleanupService>(
+                    "auto-cancel-no-show",
+                    service => service.AutoCancelNoShow(),
+                    "*/10 * * * *" // Chạy mỗi 10 phút
+                );
+                break; // Thành công → thoát vòng lặp
+            }
+            catch (Exception ex) when (attempt < 3)
+            {
+                var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+                logger.LogWarning(ex, "Hangfire chưa sẵn sàng, thử lại sau 3 giây... (lần {Attempt}/3)", attempt);
+                await Task.Delay(3000);
+            }
+        }
     }
 }
 
