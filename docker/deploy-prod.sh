@@ -203,6 +203,12 @@ configure_env() {
         read -p "  📧 Email gửi đi (From): " SMTP_FROM
     fi
 
+    echo ""
+
+    # --- Nginx / Domain ---
+    read -p "  🌍 Tên miền (VD: datphong.ictu.edu.vn, Enter = bỏ qua): " DOMAIN_NAME
+    DOMAIN_NAME=${DOMAIN_NAME:-""}
+
     # Ghi file .env
     cat > "$ENV_FILE" << EOF
 # =============================================
@@ -233,6 +239,9 @@ SMTP_PORT=$SMTP_PORT
 SMTP_USER=$SMTP_USER
 SMTP_PASS=$SMTP_PASS
 SMTP_FROM=$SMTP_FROM
+
+# --- Nginx / Domain ---
+DOMAIN_NAME=$DOMAIN_NAME
 EOF
 
     chmod 600 "$ENV_FILE"
@@ -315,6 +324,7 @@ printf "${CYAN}║${NC}  🌐 Frontend:       http://localhost:%-20s${CYAN}║${
 printf "${CYAN}║${NC}  📡 Swagger UI:     http://localhost:%s/swagger\n" "${API_PORT:-5114}"
 printf "${CYAN}║${NC}  🤖 Gemini AI:      %-37s${CYAN}║${NC}\n" "$([ -n "$GEMINI_API_KEY" ] && echo "Đã cấu hình ✅" || echo "Tắt ⏭️")"
 printf "${CYAN}║${NC}  📧 Email SMTP:     %-37s${CYAN}║${NC}\n" "$([ -n "$SMTP_HOST" ] && echo "$SMTP_HOST ✅" || echo "Tắt ⏭️")"
+printf "${CYAN}║${NC}  🌍 Tên miền:       %-37s${CYAN}║${NC}\n" "$([ -n "$DOMAIN_NAME" ] && echo "$DOMAIN_NAME ✅" || echo "Không dùng Nginx ⏭️")"
 echo -e "${CYAN}╚══════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -411,7 +421,161 @@ fi
 echo ""
 
 # =============================================
-# BUOC 9: Ket qua
+# BUOC 9: Cau hinh Nginx (neu co domain)
+# =============================================
+
+if [ -n "$DOMAIN_NAME" ]; then
+    print_step "🌐 Bước 9: Cấu hình Nginx Reverse Proxy"
+
+    # Cai Nginx neu chua co
+    if ! command -v nginx &> /dev/null; then
+        if [[ $EUID -eq 0 ]]; then
+            log_info "Đang cài đặt Nginx..."
+            apt-get install -y -qq nginx > /dev/null 2>&1
+            systemctl enable nginx
+            log_ok "Nginx đã cài đặt"
+        else
+            log_err "Nginx chưa được cài. Chạy: sudo apt install -y nginx"
+        fi
+    else
+        log_ok "Nginx đã có sẵn"
+    fi
+
+    # Tao file cau hinh Nginx
+    NGINX_CONF="/etc/nginx/sites-available/roomscheduling"
+    NGINX_LINK="/etc/nginx/sites-enabled/roomscheduling"
+    OVERWRITE_NGINX=""
+
+    if [ -f "$NGINX_CONF" ]; then
+        log_warn "File cấu hình Nginx đã tồn tại: $NGINX_CONF"
+        read -p "     Ghi đè? (y/N): " OVERWRITE_NGINX
+        if [[ ! "$OVERWRITE_NGINX" =~ ^[Yy]$ ]]; then
+            log_info "Giữ nguyên cấu hình Nginx cũ"
+        fi
+    fi
+
+    if [ ! -f "$NGINX_CONF" ] || [[ "$OVERWRITE_NGINX" =~ ^[Yy]$ ]]; then
+        cat > "$NGINX_CONF" << NGINXEOF
+# =============================================
+# Nginx Reverse Proxy — He thong Dat phong ICTU
+# Tao boi deploy-prod.sh luc $(date '+%Y-%m-%d %H:%M:%S')
+# Domain: $DOMAIN_NAME
+# =============================================
+
+# --- Frontend (React) ---
+server {
+    listen 80;
+    server_name ${DOMAIN_NAME};
+
+    location / {
+        proxy_pass http://127.0.0.1:${FE_PORT:-3000};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_cache_bypass \$http_upgrade;
+    }
+}
+
+# --- Backend API ---
+server {
+    listen 80;
+    server_name api.${DOMAIN_NAME};
+
+    location / {
+        proxy_pass http://127.0.0.1:${API_PORT:-5114};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_cache_bypass \$http_upgrade;
+
+        # Cho phep upload file lon
+        client_max_body_size 50M;
+    }
+}
+NGINXEOF
+
+        log_ok "Đã tạo cấu hình Nginx: $NGINX_CONF"
+
+        # Tao symlink
+        if [ ! -L "$NGINX_LINK" ]; then
+            ln -sf "$NGINX_CONF" "$NGINX_LINK"
+            log_ok "Đã kích hoạt site trong sites-enabled"
+        fi
+
+        # Xoa default site neu ton tai
+        if [ -L "/etc/nginx/sites-enabled/default" ]; then
+            rm -f /etc/nginx/sites-enabled/default
+            log_info "Đã tắt site mặc định của Nginx"
+        fi
+
+        # Kiem tra cau hinh Nginx
+        if nginx -t 2>/dev/null; then
+            log_ok "Cấu hình Nginx hợp lệ"
+            systemctl reload nginx 2>/dev/null || systemctl restart nginx
+            log_ok "Nginx đã reload"
+        else
+            log_err "Cấu hình Nginx có lỗi! Kiểm tra: sudo nginx -t"
+        fi
+    fi
+
+    echo ""
+
+    # --- SSL Let's Encrypt ---
+    read -p "  🔒 Cài SSL (Let's Encrypt) cho $DOMAIN_NAME? (y/N): " INSTALL_SSL
+    if [[ "$INSTALL_SSL" =~ ^[Yy]$ ]]; then
+        if ! command -v certbot &> /dev/null; then
+            if [[ $EUID -eq 0 ]]; then
+                log_info "Đang cài Certbot..."
+                apt-get install -y -qq certbot python3-certbot-nginx > /dev/null 2>&1
+                log_ok "Certbot đã cài đặt"
+            else
+                log_err "Certbot chưa cài. Chạy: sudo apt install -y certbot python3-certbot-nginx"
+            fi
+        fi
+
+        if command -v certbot &> /dev/null; then
+            echo ""
+            log_info "Đang xin chứng chỉ SSL cho $DOMAIN_NAME..."
+            read -p "  📧 Email cho Let's Encrypt (bắt buộc): " LE_EMAIL
+
+            if [ -n "$LE_EMAIL" ]; then
+                certbot --nginx \
+                    -d "$DOMAIN_NAME" \
+                    -d "api.$DOMAIN_NAME" \
+                    --email "$LE_EMAIL" \
+                    --agree-tos \
+                    --non-interactive \
+                    --redirect
+
+                if [ $? -eq 0 ]; then
+                    log_ok "SSL đã cài đặt thành công! 🔒"
+                    log_ok "Tự động gia hạn đã được kích hoạt (certbot renew)"
+                else
+                    log_warn "Không thể cài SSL tự động."
+                    log_info "Thử thủ công: sudo certbot --nginx -d $DOMAIN_NAME"
+                fi
+            else
+                log_warn "Bỏ qua SSL — chưa nhập email"
+            fi
+        fi
+    else
+        log_info "Bỏ qua SSL. Khi nào cần, chạy:"
+        echo -e "     ${BOLD}sudo certbot --nginx -d $DOMAIN_NAME -d api.$DOMAIN_NAME${NC}"
+    fi
+
+    echo ""
+fi
+
+# =============================================
+# BUOC 10: Ket qua
 # =============================================
 
 # Kiem tra trang thai container
@@ -431,8 +595,13 @@ if $ALL_RUNNING; then
     echo -e "${GREEN}║${NC}         ${BOLD}🎉 TRIỂN KHAI PRODUCTION THÀNH CÔNG!${NC}              ${GREEN}║${NC}"
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════╣${NC}"
     echo -e "${GREEN}║${NC}                                                          ${GREEN}║${NC}"
-    printf  "${GREEN}║${NC}  🌐 Frontend:   http://localhost:%-24s${GREEN}║${NC}\n" "${FE_PORT:-3000}"
-    printf  "${GREEN}║${NC}  📡 Swagger:    http://localhost:%s/swagger               ${GREEN}║${NC}\n" "${API_PORT:-5114}"
+    if [ -n "$DOMAIN_NAME" ]; then
+        printf  "${GREEN}║${NC}  🌐 Frontend:   http://%-35s${GREEN}║${NC}\n" "$DOMAIN_NAME"
+        printf  "${GREEN}║${NC}  📡 Swagger:    http://api.%-31s${GREEN}║${NC}\n" "$DOMAIN_NAME/swagger"
+    else
+        printf  "${GREEN}║${NC}  🌐 Frontend:   http://localhost:%-24s${GREEN}║${NC}\n" "${FE_PORT:-3000}"
+        printf  "${GREEN}║${NC}  📡 Swagger:    http://localhost:%-24s${GREEN}║${NC}\n" "${API_PORT:-5114}/swagger"
+    fi
     printf  "${GREEN}║${NC}  🗄️  SQL Server: localhost:%-31s${GREEN}║${NC}\n" "${DB_PORT:-1433}"
     echo -e "${GREEN}║${NC}                                                          ${GREEN}║${NC}"
     echo -e "${GREEN}╠══════════════════════════════════════════════════════════╣${NC}"
