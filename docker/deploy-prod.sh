@@ -114,40 +114,7 @@ fi
 echo ""
 
 # =============================================
-# BUOC 2: Kiem tra / Tao file .env
-# =============================================
-
-print_step "⚙️  Bước 2: Cấu hình môi trường (.env)"
-
-if [ -f "$ENV_FILE" ]; then
-    log_ok "Tìm thấy file .env hiện tại"
-    echo ""
-
-    # Hien thi cau hinh hien tai
-    source "$ENV_FILE"
-    echo -e "  ${BOLD}Cấu hình hiện tại:${NC}"
-    echo -e "  🔑 SQL Password:  ${MSSQL_SA_PASSWORD:0:4}****"
-    echo -e "  🗄️  Database:      ${DB_NAME:-RoomScheduling}"
-    echo -e "  🔌 Cổng SQL:      ${DB_PORT:-1433}"
-    echo -e "  📡 Cổng Backend:  ${API_PORT:-5114}"
-    echo -e "  🌐 Cổng Frontend: ${FE_PORT:-3000}"
-    echo -e "  🔐 JWT Secret:    ${JWT_SECRET:0:8}..."
-    echo -e "  🤖 Gemini AI:     $([ -n "$GEMINI_API_KEY" ] && echo "Đã cấu hình ✅" || echo "Chưa đặt ⏭️")"
-    echo -e "  📧 SMTP:          $([ -n "$SMTP_HOST" ] && echo "$SMTP_HOST ✅" || echo "Chưa đặt ⏭️")"
-    echo ""
-
-    read -p "  🔄 Cấu hình lại? (y/N): " RECONFIG
-    if [[ "$RECONFIG" =~ ^[Yy]$ ]]; then
-        configure_env
-    fi
-else
-    log_warn "Chưa có file .env — Bắt đầu cấu hình..."
-    echo ""
-    configure_env
-fi
-
-# =============================================
-# Ham cau hinh .env
+# Ham cau hinh .env (phai khai bao truoc khi goi)
 # =============================================
 
 configure_env() {
@@ -248,8 +215,36 @@ EOF
     log_ok "Đã tạo file .env (quyền 600 — chỉ owner đọc được)"
 }
 
-# Goi configure_env neu chua co .env (phai khai bao ham truoc khi goi)
-if [ ! -f "$ENV_FILE" ]; then
+# =============================================
+# BUOC 2: Kiem tra / Tao file .env
+# =============================================
+
+print_step "⚙️  Bước 2: Cấu hình môi trường (.env)"
+
+if [ -f "$ENV_FILE" ]; then
+    log_ok "Tìm thấy file .env hiện tại"
+    echo ""
+
+    # Hien thi cau hinh hien tai
+    source "$ENV_FILE"
+    echo -e "  ${BOLD}Cấu hình hiện tại:${NC}"
+    echo -e "  🔑 SQL Password:  ${MSSQL_SA_PASSWORD:0:4}****"
+    echo -e "  🗄️  Database:      ${DB_NAME:-RoomScheduling}"
+    echo -e "  🔌 Cổng SQL:      ${DB_PORT:-1433}"
+    echo -e "  📡 Cổng Backend:  ${API_PORT:-5114}"
+    echo -e "  🌐 Cổng Frontend: ${FE_PORT:-3000}"
+    echo -e "  🔐 JWT Secret:    ${JWT_SECRET:0:8}..."
+    echo -e "  🤖 Gemini AI:     $([ -n "$GEMINI_API_KEY" ] && echo "Đã cấu hình ✅" || echo "Chưa đặt ⏭️")"
+    echo -e "  📧 SMTP:          $([ -n "$SMTP_HOST" ] && echo "$SMTP_HOST ✅" || echo "Chưa đặt ⏭️")"
+    echo ""
+
+    read -p "  🔄 Cấu hình lại? (y/N): " RECONFIG
+    if [[ "$RECONFIG" =~ ^[Yy]$ ]]; then
+        configure_env
+    fi
+else
+    log_warn "Chưa có file .env — Bắt đầu cấu hình..."
+    echo ""
     configure_env
 fi
 
