@@ -1,36 +1,100 @@
 using Hangfire;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
 using RoomScheduling.Application.Interfaces;
 using RoomScheduling.Application.Services;
 using RoomScheduling.Infrastructure.Context;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 1. Đăng ký Controllers và Swagger
+// 1. Đọc JwtSettings từ appsettings.json
+var jwtSecret = builder.Configuration["JwtSettings:Secret"] ?? "RoomSchedulingSystemSuperSecretKey2026!!";
+var jwtIssuer = builder.Configuration["JwtSettings:Issuer"] ?? "RoomSchedulingAPI";
+var jwtAudience = builder.Configuration["JwtSettings:Audience"] ?? "RoomSchedulingFrontend";
+
+// 2. Đăng ký JWT Authentication
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = jwtIssuer,
+            ValidAudience = jwtAudience,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret))
+        };
+    });
+
+// 3. Đăng ký Controllers và Swagger
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
-        // Dòng này giúp bỏ qua các vòng lặp khi chuyển dữ liệu sang JSON
         options.JsonSerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles;
+        // Trả về camelCase chuẩn để Node.js không cần transform nữa
+        options.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
     });
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+
+// Cấu hình Swagger hỗ trợ JWT Bearer
+builder.Services.AddSwaggerGen(c =>
+{
+    c.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+    {
+        Description = "Nhập: Bearer {token}",
+        Name = "Authorization",
+        In = Microsoft.OpenApi.Models.ParameterLocation.Header,
+        Type = Microsoft.OpenApi.Models.SecuritySchemeType.ApiKey,
+        Scheme = "Bearer"
+    });
+    c.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
+    {
+        {
+            new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+            {
+                Reference = new Microsoft.OpenApi.Models.OpenApiReference
+                {
+                    Type = Microsoft.OpenApi.Models.ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                }
+            },
+            Array.Empty<string>()
+        }
+    });
+});
+
 builder.Services.AddHangfire(x => x.UseSqlServerStorage(builder.Configuration.GetConnectionString("DefaultConnection")));
 builder.Services.AddHangfireServer();
-// 2. Đăng ký Database (SQL Server)
+
+// 4. Đăng ký Database (SQL Server)
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(connectionString,
     b => b.MigrationsAssembly("RoomScheduling.Infrastructure")));
 
-// 3. KẾT NỐI INTERFACE VỚI CONTEXT (Dòng cực kỳ quan trọng để sửa lỗi của bạn)
+// 5. Kết nối Interface với Context
 builder.Services.AddScoped<IAppDbContext>(provider => provider.GetRequiredService<AppDbContext>());
 builder.Services.AddScoped<EmailService>();
-// 4. Đăng ký Service xử lý logic đặt phòng
+
+// 6. Đăng ký Services
 builder.Services.AddScoped<LichService>();
 builder.Services.AddScoped<RoomCleanupService>();
 builder.Services.AddHostedService<RoomScheduling.API.Services.RoomReminderService>();
 
+// 7. CORS: cho phép Node.js BFF (port 3000) gọi vào
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowFrontend", policy =>
+    {
+        policy.WithOrigins("http://localhost:3000", "https://localhost:3000")
+              .AllowAnyHeader()
+              .AllowAnyMethod();
+    });
+});
 
 var app = builder.Build();
 
@@ -42,12 +106,17 @@ if (app.Environment.IsDevelopment())
 
 // Không dùng HttpsRedirection bên trong Docker vì Nginx đã xử lý SSL
 // app.UseHttpsRedirection();
+
+app.UseCors("AllowFrontend");
+
+// QUAN TRỌNG: UseAuthentication phải đứng TRƯỚC UseAuthorization
+app.UseAuthentication();
 app.UseAuthorization();
-// 1. Sau dòng app.UseAuthorization();
-app.UseHangfireDashboard(); // Đường dẫn /hangfire để bạn theo dõi các job ngầm
+
+app.UseHangfireDashboard();
 app.MapControllers();
 
-// 6. Tự động Migration và nạp 20 phòng, 100 yêu cầu mẫu (PI 4.2)
+// 8. Tự động Migration và nạp dữ liệu mẫu
 using (var scope = app.Services.CreateScope())
 {
     var services = scope.ServiceProvider;
@@ -64,8 +133,7 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
-// 7. Đăng ký Hangfire recurring job SAU khi migration xong (database đã tồn tại)
-// Retry vì Hangfire schema có thể chưa cài xong
+// 9. Đăng ký Hangfire recurring job SAU khi migration xong
 using (var scope = app.Services.CreateScope())
 {
     var recurringJobManager = scope.ServiceProvider.GetService<IRecurringJobManager>();
@@ -78,9 +146,9 @@ using (var scope = app.Services.CreateScope())
                 recurringJobManager.AddOrUpdate<RoomCleanupService>(
                     "auto-cancel-no-show",
                     service => service.AutoCancelNoShow(),
-                    "*/10 * * * *" // Chạy mỗi 10 phút
+                    "*/10 * * * *"
                 );
-                break; // Thành công → thoát vòng lặp
+                break;
             }
             catch (Exception ex) when (attempt < 3)
             {

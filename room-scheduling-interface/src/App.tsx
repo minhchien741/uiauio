@@ -45,21 +45,20 @@ export default function App() {
     if (!user) return;
     const fetchUnread = () => {
       const token = localStorage.getItem("token");
-      if (!token) return;
-      fetch("/api/notifications", { headers: { Authorization: `Bearer ${token}` } })
+      const userId = user?.id;
+      if (!token || !userId) return;
+      fetch(`/api/Phong/user/thong-bao/${userId}`, { headers: { Authorization: `Bearer ${token}` } })
         .then(r => r.json())
         .then(d => {
           if (!Array.isArray(d)) return;
-          const s = localStorage.getItem("readNotifications");
-          const readIds = s ? new Set(JSON.parse(s)) : new Set();
-          const unread = d.filter((n: any) => !n.is_read && !readIds.has(n.id)).length;
+          const unread = d.filter((n: any) => !n.isRead).length;
           setUnreadCount(unread);
         }).catch(() => { });
     };
     fetchUnread();
 
-    // Auto-poll and manual sync
-    const interval = setInterval(fetchUnread, 15000); // update every 15s
+    // Auto-poll every 15s
+    const interval = setInterval(fetchUnread, 15000);
     window.addEventListener("notifications_read", fetchUnread);
     return () => {
       clearInterval(interval);

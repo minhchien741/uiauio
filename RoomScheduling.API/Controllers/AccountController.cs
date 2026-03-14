@@ -1,7 +1,9 @@
-﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using RoomScheduling.Domain.Entities;
 using RoomScheduling.Infrastructure.Context;
-using Microsoft.EntityFrameworkCore; // Thiếu dòng này là không dùng được hàm Async
+using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 
 namespace RoomScheduling.API.Controllers
 {
@@ -14,22 +16,19 @@ namespace RoomScheduling.API.Controllers
 
         [HttpPost("register")]
         public async Task<IActionResult> Register(
-        string username,
-        string password,
-        string email,
-        string hoTen,
-        string soDienThoai,
-        string khoa)
+            string username,
+            string password,
+            string email,
+            string hoTen,
+            string soDienThoai,
+            string khoa)
         {
-            // 1. Kiểm tra trùng tên đăng nhập
             if (await _context.NguoiDungs.AnyAsync(u => u.Username == username))
-                return BadRequest("Tên đăng nhập đã tồn tại.");
+                return BadRequest(new { message = "Tên đăng nhập đã tồn tại." });
 
-            // 2. Tạo đối tượng người dùng mới
             var newUser = new NguoiDung
             {
                 Username = username,
-                // SỬA TẠI ĐÂY: Mã hóa mật khẩu trước khi lưu
                 Password = BCrypt.Net.BCrypt.HashPassword(password),
                 Email = email,
                 HoTen = hoTen,
@@ -39,80 +38,82 @@ namespace RoomScheduling.API.Controllers
                 NgayTao = DateTime.Now
             };
 
-            // 3. Lưu vào database
             _context.NguoiDungs.Add(newUser);
             await _context.SaveChangesAsync();
 
             return Ok(new
             {
-                Message = "Đăng ký thành công!",
-                UserId = newUser.Id,
-                Username = newUser.Username
+                message = "Đăng ký thành công!",
+                userId = newUser.Id,
+                username = newUser.Username
             });
         }
 
         [HttpGet("profile/{userId}")]
+        [Authorize]
         public async Task<IActionResult> GetProfile(int userId)
         {
-            // Tìm trong DB
             var user = await _context.NguoiDungs.FindAsync(userId);
-
-            // Nếu tìm không thấy thì trả về 404 (Đây chính là lỗi bạn đang gặp)
             if (user == null)
-            {
-                return NotFound($"Không tìm thấy người dùng có ID = {userId}");
-            }
+                return NotFound(new { message = $"Không tìm thấy người dùng có ID = {userId}" });
 
-            return Ok(user);
+            return Ok(new
+            {
+                id = user.Id,
+                username = user.Username,
+                email = user.Email,
+                hoTen = user.HoTen,
+                soDienThoai = user.SoDienThoai,
+                khoa = user.Khoa,
+                role = user.Role
+            });
         }
 
         [HttpPut("update-profile/{userId}")]
+        [Authorize]
         public async Task<IActionResult> UpdateProfile(int userId, [FromBody] UpdateProfileRequest request)
         {
-            // 1. Tìm người dùng trong DB
             var user = await _context.NguoiDungs.FindAsync(userId);
-            if (user == null) return NotFound("Người dùng không tồn tại.");
+            if (user == null) return NotFound(new { message = "Người dùng không tồn tại." });
 
-            // 2. Cập nhật các thông tin được phép sửa
             user.HoTen = request.HoTen;
             user.Email = request.Email;
             user.SoDienThoai = request.SoDienThoai;
-            user.Khoa = request.Khoa; // Nếu muốn cho phép User tự chuyển khoa (thực tế thường admin làm)
+            user.Khoa = request.Khoa;
 
             try
             {
                 await _context.SaveChangesAsync();
-                return Ok(new { Message = "Cập nhật thông tin thành công!", User = user });
+                return Ok(new { message = "Cập nhật thông tin thành công!" });
             }
             catch (Exception)
             {
-                return BadRequest("Có lỗi xảy ra trong quá trình cập nhật.");
+                return BadRequest(new { message = "Có lỗi xảy ra trong quá trình cập nhật." });
             }
         }
 
-        // Lớp phụ để hứng dữ liệu từ Body gửi lên
+        [HttpPost("change-password")]
+        [Authorize]
+        public async Task<IActionResult> ChangePassword(int userId, string oldPassword, string newPassword)
+        {
+            var user = await _context.NguoiDungs.FindAsync(userId);
+            if (user == null) return NotFound();
+
+            if (!BCrypt.Net.BCrypt.Verify(oldPassword, user.Password))
+                return BadRequest(new { message = "Mật khẩu cũ không chính xác." });
+
+            user.Password = BCrypt.Net.BCrypt.HashPassword(newPassword);
+            await _context.SaveChangesAsync();
+
+            return Ok(new { message = "Đổi mật khẩu thành công. Hãy dùng mật khẩu mới cho lần đăng nhập sau." });
+        }
+
         public class UpdateProfileRequest
         {
             public string HoTen { get; set; } = string.Empty;
             public string Email { get; set; } = string.Empty;
             public string SoDienThoai { get; set; } = string.Empty;
             public string? Khoa { get; set; }
-        }
-        [HttpPost("change-password")]
-        public async Task<IActionResult> ChangePassword(int userId, string oldPassword, string newPassword)
-        {
-            var user = await _context.NguoiDungs.FindAsync(userId);
-            if (user == null) return NotFound();
-
-            // Kiểm tra mật khẩu cũ bằng BCrypt
-            if (!BCrypt.Net.BCrypt.Verify(oldPassword, user.Password))
-                return BadRequest("Mật khẩu cũ không chính xác.");
-
-            // Lưu mật khẩu mới đã mã hóa
-            user.Password = BCrypt.Net.BCrypt.HashPassword(newPassword);
-            await _context.SaveChangesAsync();
-
-            return Ok("Đổi mật khẩu thành công. Hãy dùng mật khẩu mới cho lần đăng nhập sau.");
         }
     }
 }

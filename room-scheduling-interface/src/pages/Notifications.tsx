@@ -6,18 +6,16 @@ export default function Notifications() {
   const [notifications, setNotifications] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const getReadIds = (): Set<number> => {
-    try { const s = localStorage.getItem("readNotifications"); return s ? new Set(JSON.parse(s)) : new Set(); }
-    catch { return new Set(); }
-  };
-  const saveReadIds = (ids: Set<number>) => localStorage.setItem("readNotifications", JSON.stringify([...ids]));
+  const token = () => localStorage.getItem("token") ?? "";
 
   const fetchNotifications = () => {
-    fetch("/api/notifications", { headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } })
+    const user = JSON.parse(localStorage.getItem("user") ?? "{}");
+    const userId = user?.id;
+    if (!userId) { setLoading(false); return; }
+    fetch(`/api/Phong/user/thong-bao/${userId}`, { headers: { Authorization: `Bearer ${token()}` } })
       .then(r => r.json())
       .then(data => {
-        const readIds = getReadIds();
-        setNotifications((Array.isArray(data) ? data : []).map((n: any) => ({ ...n, is_read: n.is_read || readIds.has(n.id) })));
+        setNotifications(Array.isArray(data) ? data : []);
         setLoading(false);
       }).catch(() => setLoading(false));
   };
@@ -25,21 +23,27 @@ export default function Notifications() {
   useEffect(() => { fetchNotifications(); }, []);
 
   const handleMarkRead = async (id: number) => {
-    await fetch(`/api/notifications/${id}/read`, { method: "PUT", headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } });
-    const ids = getReadIds(); ids.add(id); saveReadIds(ids);
+    await fetch(`/api/Phong/user/thong-bao/${id}/read`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token()}` }
+    });
     fetchNotifications();
     window.dispatchEvent(new Event("notifications_read"));
   };
 
-  const handleMarkAllRead = () => {
-    const ids = getReadIds();
-    notifications.forEach(n => ids.add(n.id));
-    saveReadIds(ids);
+  const handleMarkAllRead = async () => {
+    const unread = notifications.filter(n => !n.isRead);
+    await Promise.all(unread.map(n =>
+      fetch(`/api/Phong/user/thong-bao/${n.id}/read`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token()}` }
+      })
+    ));
     fetchNotifications();
     window.dispatchEvent(new Event("notifications_read"));
   };
 
-  const unreadCount = notifications.filter(n => !n.is_read).length;
+  const unreadCount = notifications.filter(n => !n.isRead).length;
 
   const fmtDate = (str: string) => { try { return format(new Date(str), "dd/MM/yyyy HH:mm"); } catch { return str; } };
 
@@ -75,29 +79,29 @@ export default function Notifications() {
               <li key={n.id} style={{
                 display: "flex", alignItems: "flex-start", gap: 14, padding: "16px 24px",
                 borderBottom: i < notifications.length - 1 ? "1px solid #F1F5F9" : "none",
-                background: n.is_read ? "#fff" : "#F5F7FF",
+                background: n.isRead ? "#fff" : "#F5F7FF",
                 transition: "background .2s",
               }}>
                 {/* Icon */}
                 <div style={{
                   width: 40, height: 40, borderRadius: 12, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
-                  background: n.is_read ? "#F1F5F9" : "linear-gradient(135deg,#EEF2FF,#E0E7FF)",
+                  background: n.isRead ? "#F1F5F9" : "linear-gradient(135deg,#EEF2FF,#E0E7FF)",
                 }}>
-                  {n.is_read ? <Bell size={18} color="#94A3B8" /> : <Info size={18} color="#4F46E5" />}
+                  {n.isRead ? <Bell size={18} color="#94A3B8" /> : <Info size={18} color="#4F46E5" />}
                 </div>
 
                 {/* Body */}
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ fontSize: 14, color: n.is_read ? "#475569" : "#0F172A", fontWeight: n.is_read ? 400 : 500, lineHeight: 1.5 }}>
+                  <p style={{ fontSize: 14, color: n.isRead ? "#475569" : "#0F172A", fontWeight: n.isRead ? 400 : 500, lineHeight: 1.5 }}>
                     {n.message}
                   </p>
-                  <p style={{ fontSize: 12, color: "#94A3B8", marginTop: 4 }}>{fmtDate(n.created_at)}</p>
+                  <p style={{ fontSize: 12, color: "#94A3B8", marginTop: 4 }}>{fmtDate(n.createdAt)}</p>
                 </div>
 
                 {/* Unread dot + action */}
                 <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-                  {!n.is_read && <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#4F46E5" }} />}
-                  {!n.is_read && (
+                  {!n.isRead && <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#4F46E5" }} />}
+                  {!n.isRead && (
                     <button onClick={() => handleMarkRead(n.id)} title="Đánh dấu đã đọc"
                       style={{ width: 32, height: 32, borderRadius: 8, background: "#EEF2FF", border: "1px solid #C7D2FE", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#4F46E5" }}>
                       <Check size={14} />
