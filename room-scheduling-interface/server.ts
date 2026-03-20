@@ -11,7 +11,8 @@ const __dirname = path.dirname(__filename);
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
-const DOTNET_API = process.env.DOTNET_API || 'https://localhost:7102';
+// const DOTNET_API = process.env.DOTNET_API || 'https://localhost:7102';
+const DOTNET_API = 'https://datphongapi.rankpush.xyz';
 
 // ==================== HELPER: GỌI .NET BACKEND ====================
 async function dotnet(urlPath: string, options?: RequestInit) {
@@ -444,91 +445,16 @@ async function startServer() {
     res.json({ frontend: 'ok', dotnet_backend: r.ok ? 'ok' : 'unreachable', dotnet_url: DOTNET_API });
   });
 
-  // ── AI CHATBOT (Gemini — key bảo mật ở Node.js) ──────────────────────
+  // ── AI CHATBOT (Nay đã chuyển 100% logic sang .NET Backend) ─────────
 
   app.post('/api/chat', async (req: any, res) => {
-    const { message } = req.body;
-    if (!process.env.GEMINI_API_KEY)
-      return res.status(500).json({ reply: 'Lỗi hệ thống: Chưa cấu hình GEMINI_API_KEY.' });
-    try {
-      const now = new Date();
-      const todayStr = now.toISOString().split('T')[0]; // YYYY-MM-DD
-
-      // Lấy song song: danh sách phòng + toàn bộ lịch đặt
-      const [roomsRes, bookingsRes] = await Promise.all([
-        dotnet('/api/Phong', { headers: authHeaders(req) }),
-        dotnet('/api/Phong/lich-dat', { headers: authHeaders(req) }),
-      ]);
-
-      const rooms: any[] = roomsRes.ok && Array.isArray(roomsRes.data) ? roomsRes.data : [];
-      const allBookings: any[] = bookingsRes.ok && Array.isArray(bookingsRes.data) ? bookingsRes.data : [];
-
-      // Lọc chỉ lấy lịch hôm nay (đã duyệt hoặc chờ duyệt)
-      const todayBookings = allBookings.filter((b: any) => {
-        const st = b.startTime ?? b.StartTime ?? '';
-        const status = b.trangThai ?? b.TrangThai;
-        // Bỏ qua lịch bị từ chối (TuChoi = 2)
-        if (status === 2 || status === 'TuChoi' || status === 'Rejected') return false;
-        return st.startsWith(todayStr);
-      });
-
-      // Build context phòng kèm lịch bận hôm nay
-      let roomContext = `Danh sách phòng và lịch đặt hôm nay (${todayStr}):\n`;
-      rooms.forEach((r: any) => {
-        const roomId = r.id ?? r.Id;
-        const roomName = r.name ?? r.ten ?? r.Ten ?? '';
-        const bookingsOfRoom = todayBookings.filter(
-          (b: any) => (b.phongId ?? b.PhongId) === roomId
-        );
-
-        // Tính xem phòng đang bận không
-        const busy = bookingsOfRoom.filter(b => {
-          const st = new Date(b.startTime ?? b.StartTime);
-          const en = new Date(b.endTime ?? b.EndTime);
-          return st <= now && en >= now;
-        });
-
-        const statusNow = busy.length > 0 ? '🔴 Đang có người dùng' : '🟢 Hiện đang trống';
-
-        roomContext += `\n📌 Phòng: ${roomName} | Sức chứa: ${r.capacity ?? r.sucChua ?? 0} người | Khoa: ${r.department ?? r.khoaQuanLy ?? 'Chung'} | Thiết bị: ${r.description ?? r.moTaThietBi ?? 'Không rõ'}\n`;
-        roomContext += `   Trạng thái hiện tại: ${statusNow}\n`;
-
-        if (bookingsOfRoom.length > 0) {
-          roomContext += `   Lịch đặt hôm nay:\n`;
-          bookingsOfRoom.forEach(b => {
-            const st = new Date(b.startTime ?? b.StartTime);
-            const en = new Date(b.endTime ?? b.EndTime);
-            const stStr = `${st.getHours().toString().padStart(2,'0')}:${st.getMinutes().toString().padStart(2,'0')}`;
-            const enStr = `${en.getHours().toString().padStart(2,'0')}:${en.getMinutes().toString().padStart(2,'0')}`;
-            const statusLabel = (b.trangThai === 1 || b.trangThai === 'DaDuyet') ? 'Đã duyệt' : 'Chờ duyệt';
-            roomContext += `     - ${stStr}–${enStr} (${statusLabel})\n`;
-          });
-        } else {
-          roomContext += `   Lịch đặt hôm nay: Chưa có ai đặt\n`;
-        }
-      });
-
-      const prompt = `Bạn là nhân viên lễ tân/trợ lý tư vấn của Hệ thống Đặt phòng học và phòng họp tại trường Đại học CNTT&TT.
-Tên bạn là "Trợ lý Ảo". Trả lời ngắn gọn, thân thiện, chuyên nghiệp bằng tiếng Việt.
-TUYỆT ĐỐI KHÔNG xưng là chatbot hay AI. Đóng vai như nhân viên thật sự đang quản lý hệ thống.
-
-Thời gian hiện tại: ${now.getHours()}:${now.getMinutes().toString().padStart(2,'0')} ngày ${todayStr}
-
-${roomContext}
-
-Câu hỏi của khách: "${message}"
-
-Hướng dẫn trả lời:
-- Nếu hỏi phòng trống: chỉ đích danh các phòng 🟢 và lịch rảnh còn lại trong ngày
-- Nếu hỏi phòng cụ thể: báo trạng thái hiện tại và các khung giờ bận
-- Nếu hỏi theo sức chứa/thiết bị: lọc và gợi ý đúng danh sách
-- Luôn nhắc khách vào mục "Tìm phòng trống" để đặt phòng chính thức`;
-
-      const reply = await callGemini(prompt);
-      res.json({ reply });
-    } catch (e: any) {
-      res.status(500).json({ message: e.message });
-    }
+    // Chỉ việc forward thẳng sang .NET
+    const result = await dotnet('/api/Chat/ask', {
+      method: 'POST',
+      headers: authHeaders(req),
+      body: JSON.stringify(req.body)
+    });
+    res.status(result.ok ? 200 : result.status).json(result.data);
   });
 
   // ==================== VITE DEV or PROD STATIC ====================

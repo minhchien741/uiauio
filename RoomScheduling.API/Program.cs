@@ -9,6 +9,13 @@ using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Cấu hình Port chạy backend từ appsettings.json
+var backendUrls = builder.Configuration["Urls"];
+if (!string.IsNullOrEmpty(backendUrls))
+{
+    builder.WebHost.UseUrls(backendUrls);
+}
+
 // 1. Đọc JwtSettings từ appsettings.json
 var jwtSecret = builder.Configuration["JwtSettings:Secret"] ?? "RoomSchedulingSystemSuperSecretKey2026!!";
 var jwtIssuer = builder.Configuration["JwtSettings:Issuer"] ?? "RoomSchedulingAPI";
@@ -31,6 +38,9 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     });
 
 // 3. Đăng ký Controllers và Swagger
+// Đăng ký HttpClient cho ChatController gọi Gemini API
+builder.Services.AddHttpClient();
+
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
@@ -86,11 +96,12 @@ builder.Services.AddScoped<RoomCleanupService>();
 builder.Services.AddHostedService<RoomScheduling.API.Services.RoomReminderService>();
 
 // 7. CORS: cho phép Node.js BFF (port 3000) gọi vào
+var allowedOrigins = builder.Configuration.GetSection("AllowedCorsOrigins").Get<string[]>() ?? new[] { "http://localhost:3000", "https://localhost:3000" };
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
-        policy.WithOrigins("http://localhost:3000", "https://localhost:3000")
+        policy.WithOrigins(allowedOrigins)
               .AllowAnyHeader()
               .AllowAnyMethod();
     });

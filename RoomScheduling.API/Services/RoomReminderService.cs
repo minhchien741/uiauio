@@ -80,7 +80,14 @@ public class RoomReminderService : BackgroundService
             }
 
             // Chờ 1 phút rồi kiểm tra tiếp
-            await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
+            try 
+            {
+                await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
+            }
+            catch (TaskCanceledException)
+            {
+                // Expected when the application is shutting down.
+            }
         }
     }
 }
